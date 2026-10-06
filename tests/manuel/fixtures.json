@@ -1,0 +1,726 @@
+{
+ "_commentaire": "Bibliothèque volontairement sale pour le compte Zotero de test (D45, D54). Aucune donnée personnelle. Les champs pdf désignent un contenu, deux fiches au même contenu ont des PDF identiques. peupler.py y ajoute des fiches propres pour atteindre une centaine. Les fiches « tags-… », « cle-… » et « nom-… » préparent les étapes 6 à 8 : tags automatiques dont un réparti sur deux disciplines, lot de mots-clés importés en tags manuels, variantes, états venus d'autres habitudes, clés de citation en double (casse comprise) et ligne « Citation Key: » dans Extra. Les PDF portent des noms hors du modèle.",
+ "collections": [
+  "Inbox",
+  "Fonds",
+  "Fonds/Psychologie",
+  "Fonds/Philosophie",
+  "Vieux classement",
+  "Vieux classement/À trier"
+ ],
+ "fiches": [
+  {
+   "ref": "doi-a",
+   "itemType": "journalArticle",
+   "title": "Acquisition of categorical color perception",
+   "creators": [
+    [
+     "Özgen",
+     "Emre"
+    ],
+    [
+     "Davies",
+     "Ian"
+    ]
+   ],
+   "date": "2002",
+   "DOI": "10.9999/zc.test.001",
+   "publicationTitle": "Journal of Test Psychology",
+   "collections": [
+    "Fonds/Psychologie"
+   ],
+   "pdf": "couleur"
+  },
+  {
+   "ref": "doi-b",
+   "itemType": "journalArticle",
+   "title": "Acquisition of Categorical Color Perception.",
+   "creators": [
+    [
+     "Özgen",
+     "Emre"
+    ],
+    [
+     "Davies",
+     "Ian"
+    ]
+   ],
+   "date": "2002",
+   "DOI": "https://doi.org/10.9999/ZC.TEST.001",
+   "collections": [
+    "Vieux classement"
+   ],
+   "tags": [
+    [
+     "perception",
+     0
+    ],
+    [
+     "Color",
+     1
+    ]
+   ],
+   "pdf": "couleur",
+   "notes": [
+    "Note de lecture sur la fiche absorbée."
+   ]
+  },
+  {
+   "ref": "sig-a",
+   "itemType": "book",
+   "title": "Radical Embodied Cognitive Science",
+   "creators": [
+    [
+     "Chemero",
+     "Anthony"
+    ]
+   ],
+   "date": "2009",
+   "publisher": "Test Press",
+   "collections": [
+    "Fonds/Philosophie"
+   ]
+  },
+  {
+   "ref": "sig-b",
+   "itemType": "book",
+   "title": "Radical embodied cognitive science",
+   "creators": [
+    [
+     "Chemero",
+     "Anthony"
+    ]
+   ],
+   "date": "2009",
+   "place": "Cambridge",
+   "ISBN": "978-0-00-000001-0",
+   "pdf": "chemero"
+  },
+  {
+   "ref": "trois-a",
+   "itemType": "journalArticle",
+   "title": "Situated learning in communities",
+   "creators": [
+    [
+     "Martin",
+     "Claire"
+    ]
+   ],
+   "date": "1991",
+   "DOI": "10.9999/zc.test.002",
+   "collections": [
+    "Inbox"
+   ]
+  },
+  {
+   "ref": "trois-b",
+   "itemType": "journalArticle",
+   "title": "Situated learning in communities",
+   "creators": [
+    [
+     "Martin",
+     "Claire"
+    ]
+   ],
+   "date": "1991",
+   "DOI": "10.9999/zc.test.002",
+   "pdf": "situe"
+  },
+  {
+   "ref": "trois-c",
+   "itemType": "journalArticle",
+   "title": "Situated Learning in Communities",
+   "creators": [
+    [
+     "Martin",
+     "C."
+    ]
+   ],
+   "date": "1991",
+   "DOI": "10.9999/zc.test.002",
+   "pdf": "situe",
+   "annoter": true
+  },
+  {
+   "ref": "ed-1938",
+   "itemType": "book",
+   "title": "La morale antique",
+   "creators": [
+    [
+     "Robin",
+     "Léon"
+    ]
+   ],
+   "date": "1938",
+   "publisher": "Éditeur ancien",
+   "ISBN": "2-07-036822-X",
+   "collections": [
+    "Fonds/Philosophie"
+   ]
+  },
+  {
+   "ref": "ed-1963",
+   "itemType": "book",
+   "title": "La morale antique",
+   "creators": [
+    [
+     "Robin (1866-1947)",
+     "Léon"
+    ]
+   ],
+   "date": "1963",
+   "publisher": "Éditeur moderne",
+   "ISBN": "978-2-07-036822-8"
+  },
+  {
+   "ref": "type-a",
+   "itemType": "journalArticle",
+   "title": "Self-organization in communicating groups",
+   "creators": [
+    [
+     "Heylen",
+     "Frans"
+    ]
+   ],
+   "date": "2013",
+   "DOI": "10.9999/zc.test.003"
+  },
+  {
+   "ref": "type-b",
+   "itemType": "conferencePaper",
+   "title": "Self-organization in communicating groups",
+   "creators": [
+    [
+     "Heylen",
+     "Frans"
+    ]
+   ],
+   "date": "2013",
+   "DOI": "10.9999/zc.test.003",
+   "proceedingsTitle": "Actes de test"
+  },
+  {
+   "ref": "trad-fr",
+   "itemType": "book",
+   "title": "Pensée et langage",
+   "creators": [
+    [
+     "Vygotski",
+     "Lev"
+    ]
+   ],
+   "date": "1997",
+   "ISBN": "978-0-00-000002-7",
+   "language": "fr"
+  },
+  {
+   "ref": "trad-en",
+   "itemType": "book",
+   "title": "Thought and language",
+   "creators": [
+    [
+     "Vygotsky",
+     "Lev"
+    ]
+   ],
+   "date": "1986",
+   "ISBN": "978-0-00-000002-7",
+   "language": "en"
+  },
+  {
+   "ref": "chap-1",
+   "itemType": "bookSection",
+   "title": "Introduction au volume",
+   "creators": [
+    [
+     "Petit",
+     "Anne"
+    ]
+   ],
+   "date": "2015",
+   "bookTitle": "Un volume collectif",
+   "ISBN": "978-0-00-000003-4"
+  },
+  {
+   "ref": "chap-2",
+   "itemType": "bookSection",
+   "title": "Second chapitre du volume",
+   "creators": [
+    [
+     "Grand",
+     "Paul"
+    ]
+   ],
+   "date": "2015",
+   "bookTitle": "Un volume collectif",
+   "ISBN": "978-0-00-000003-4"
+  },
+  {
+   "ref": "pdf-partage-a",
+   "itemType": "journalArticle",
+   "title": "Un article sous deux titres",
+   "creators": [
+    [
+     "Leroy",
+     "Marc"
+    ]
+   ],
+   "date": "2018",
+   "pdf": "partage"
+  },
+  {
+   "ref": "pdf-partage-b",
+   "itemType": "journalArticle",
+   "title": "Article dont le titre diffère",
+   "creators": [
+    [
+     "Leroy",
+     "M."
+    ]
+   ],
+   "date": "2018",
+   "pdf": "partage"
+  },
+  {
+   "ref": "sans-auteur",
+   "itemType": "journalArticle",
+   "title": "Un article sans auteur",
+   "creators": [],
+   "date": "2020",
+   "collections": [
+    "Inbox"
+   ]
+  },
+  {
+   "ref": "sans-date",
+   "itemType": "book",
+   "title": "Un livre sans date",
+   "creators": [
+    [
+     "Moreau",
+     "Julie"
+    ]
+   ],
+   "date": ""
+  },
+  {
+   "ref": "document",
+   "itemType": "document",
+   "title": "Un document au type par défaut",
+   "creators": [
+    [
+     "Roux",
+     "Henri"
+    ]
+   ],
+   "date": "2011"
+  },
+  {
+   "ref": "tags-auto",
+   "itemType": "journalArticle",
+   "title": "Un article aux mots-clés d'éditeur",
+   "creators": [
+    [
+     "Faure",
+     "Lise"
+    ]
+   ],
+   "date": "2019",
+   "tags": [
+    [
+     "Education",
+     1
+    ],
+    [
+     "Learning",
+     1
+    ],
+    [
+     "learning",
+     1
+    ],
+    [
+     "#apprentissage",
+     0
+    ],
+    [
+     "#Apprentissage",
+     0
+    ]
+   ],
+   "collections": [
+    "Fonds/Psychologie"
+   ]
+  },
+  {
+   "ref": "trop-rangee",
+   "itemType": "journalArticle",
+   "title": "Une fiche rangée partout",
+   "creators": [
+    [
+     "Blanc",
+     "Yves"
+    ]
+   ],
+   "date": "2017",
+   "collections": [
+    "Fonds/Psychologie",
+    "Fonds/Philosophie",
+    "Vieux classement/À trier"
+   ],
+   "pdf": "partout"
+  },
+  {
+   "ref": "sans-collection",
+   "itemType": "journalArticle",
+   "title": "Une fiche sans collection",
+   "creators": [
+    [
+     "Noir",
+     "Sophie"
+    ]
+   ],
+   "date": "2021"
+  },
+  {
+   "ref": "pdf-double",
+   "itemType": "journalArticle",
+   "title": "Une fiche avec deux fois le même PDF",
+   "creators": [
+    [
+     "Gris",
+     "Louis"
+    ]
+   ],
+   "date": "2016",
+   "pdf": "double",
+   "pdf2": "double",
+   "collections": [
+    "Fonds/Psychologie"
+   ]
+  },
+  {
+   "ref": "tags-a",
+   "itemType": "journalArticle",
+   "title": "Embodied perception and action",
+   "creators": [
+    [
+     "Noë",
+     "Alva"
+    ]
+   ],
+   "date": "2004",
+   "collections": [
+    "Fonds/Psychologie"
+   ],
+   "tags": [
+    [
+     "Embodiment",
+     1
+    ],
+    [
+     "Perception",
+     1
+    ],
+    [
+     "Humans",
+     1
+    ],
+    [
+     "Adult",
+     1
+    ]
+   ],
+   "pdf": "noe"
+  },
+  {
+   "ref": "tags-b",
+   "itemType": "journalArticle",
+   "title": "The extended mind revisited",
+   "creators": [
+    [
+     "Clark",
+     "Andy"
+    ]
+   ],
+   "date": "2008",
+   "collections": [
+    "Fonds/Philosophie"
+   ],
+   "tags": [
+    [
+     "Embodiment",
+     1
+    ],
+    [
+     "Cognition",
+     1
+    ],
+    [
+     "Philosophy of Mind",
+     1
+    ]
+   ]
+  },
+  {
+   "ref": "tags-c",
+   "itemType": "book",
+   "title": "Mind in life",
+   "creators": [
+    [
+     "Thompson",
+     "Evan"
+    ]
+   ],
+   "date": "2007",
+   "publisher": "Test Press",
+   "collections": [
+    "Fonds/Philosophie"
+   ],
+   "tags": [
+    [
+     "Embodiment",
+     1
+    ],
+    [
+     "Phenomenology",
+     1
+    ],
+    [
+     "Biology",
+     1
+    ]
+   ]
+  },
+  {
+   "ref": "tags-d",
+   "itemType": "journalArticle",
+   "title": "Sensorimotor contingencies",
+   "creators": [
+    [
+     "O'Regan",
+     "Kevin"
+    ]
+   ],
+   "date": "2001",
+   "collections": [
+    "Fonds/Psychologie"
+   ],
+   "tags": [
+    [
+     "Embodiment",
+     1
+    ],
+    [
+     "Vision",
+     1
+    ],
+    [
+     "Humans",
+     1
+    ],
+    [
+     "to read",
+     0
+    ]
+   ]
+  },
+  {
+   "ref": "tags-e",
+   "itemType": "journalArticle",
+   "title": "Enactive approaches to cognition",
+   "creators": [
+    [
+     "Di Paolo",
+     "Ezequiel"
+    ]
+   ],
+   "date": "2010",
+   "collections": [
+    "Fonds/Philosophie"
+   ],
+   "tags": [
+    [
+     "Embodiment",
+     1
+    ],
+    [
+     "Autonomy",
+     1
+    ],
+    [
+     "#Mémoire",
+     0
+    ],
+    [
+     "lu",
+     0
+    ]
+   ]
+  },
+  {
+   "ref": "tags-f",
+   "itemType": "journalArticle",
+   "title": "Memory as reconstruction",
+   "creators": [
+    [
+     "Bartlett",
+     "Frederic"
+    ]
+   ],
+   "date": "1932",
+   "collections": [
+    "Fonds/Psychologie"
+   ],
+   "tags": [
+    [
+     "#memoire",
+     0
+    ],
+    [
+     "Émotions",
+     0
+    ],
+    [
+     "émotion",
+     0
+    ]
+   ]
+  },
+  {
+   "ref": "tags-importes",
+   "itemType": "journalArticle",
+   "title": "A survey imported from another reference manager",
+   "creators": [
+    [
+     "Martinez",
+     "Lucia"
+    ]
+   ],
+   "date": "2015",
+   "collections": [
+    "Vieux classement"
+   ],
+   "tags": [
+    [
+     "Neural networks",
+     0
+    ],
+    [
+     "Backpropagation",
+     0
+    ],
+    [
+     "Gradient descent",
+     0
+    ],
+    [
+     "Learning rate",
+     0
+    ],
+    [
+     "Overfitting",
+     0
+    ],
+    [
+     "Regularization",
+     0
+    ],
+    [
+     "Dropout",
+     0
+    ],
+    [
+     "Batch normalization",
+     0
+    ],
+    [
+     "Convolution",
+     0
+    ],
+    [
+     "Recurrent networks",
+     0
+    ],
+    [
+     "Attention mechanism",
+     0
+    ],
+    [
+     "Transfer learning",
+     0
+    ]
+   ],
+   "pdf": "survey"
+  },
+  {
+   "ref": "cle-a",
+   "itemType": "journalArticle",
+   "title": "Situated cognition and the frame problem",
+   "creators": [
+    [
+     "Dreyfus",
+     "Hubert"
+    ]
+   ],
+   "date": "1992",
+   "collections": [
+    "Fonds/Philosophie"
+   ],
+   "citationKey": "dreyfusSituatedCognition1992"
+  },
+  {
+   "ref": "cle-b",
+   "itemType": "journalArticle",
+   "title": "Why Heideggerian AI failed",
+   "creators": [
+    [
+     "Dreyfus",
+     "Hubert"
+    ]
+   ],
+   "date": "1992",
+   "collections": [
+    "Fonds/Philosophie"
+   ],
+   "citationKey": "DreyfusSituatedCognition1992"
+  },
+  {
+   "ref": "cle-extra",
+   "itemType": "book",
+   "title": "What computers still can't do",
+   "creators": [
+    [
+     "Dreyfus",
+     "Hubert"
+    ]
+   ],
+   "date": "1992",
+   "publisher": "Test Press",
+   "collections": [
+    "Fonds/Philosophie"
+   ],
+   "extra": "Citation Key: dreyfusWhatComputersStill1992\nOriginal date: 1972"
+  },
+  {
+   "ref": "nom-a",
+   "itemType": "journalArticle",
+   "title": "Affordances revisited",
+   "creators": [
+    [
+     "Chemero",
+     "Anthony"
+    ],
+    [
+     "Turvey",
+     "Michael"
+    ]
+   ],
+   "date": "2003",
+   "collections": [
+    "Fonds/Psychologie"
+   ],
+   "pdf": "affordances"
+  }
+ ]
+}

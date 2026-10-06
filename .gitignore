@@ -1,0 +1,17 @@
+.env
+__pycache__/
+.venv/
+.pytest_cache/
+dist/
+.DS_Store
+.claude/worktrees/
+.ruff_cache/
+.kilo/
+config.toml
+*.sqlite
+
+# Dossiers de travail de zc, s'ils sont créés à la racine du dépôt
+/journal/
+/plans/
+/rapports/
+/suivi/
