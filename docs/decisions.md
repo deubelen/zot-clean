@@ -1369,6 +1369,10 @@ Constat. La fusion ne reprenait des fiches absorbées que `dc:replaces`. Les lie
 
 Constat, signalé pendant D205 et vérifié dans le code de Zotero (`_saveData` de `item.js`). Zotero range la note propre d'une pièce jointe dans la table `itemNotes`, comme une note, mais sans parent. La lecture prenait donc chaque pièce jointe ainsi enregistrée pour une note isolée. Les comptes de l'audit et du contrôle étaient faussés, et la note d'une copie de PDF n'était jamais vue, si bien que `zc pieces` pouvait mettre à la corbeille une copie identique qui portait une note, contre D125. Décision, technique. La lecture ne range dans les notes que les éléments de type note, et retient pour chaque pièce jointe si elle porte une note non vide (Zotero enveloppe toute note, même vide, dans un `<div>`). Le rattrapage de D171 fait de même avec le champ `note` de l'API. Une copie dont la pièce jointe porte une note n'est jamais mise à la corbeille, par `zc pieces` comme par la fusion.
 
+### D207. Minuteur dans le terminal
+
+Constat de l'utilisateur, au premier audit de la version 0.3.1. Rien ne s'affiche pendant qu'une commande lit la bibliothèque, si bien qu'on ne sait pas si elle tourne. Décision, demandée par l'utilisateur. Sous un terminal, « zc audit en cours… 12 s » s'affiche dès le lancement sur la sortie d'erreur et se met à jour chaque seconde. Les messages de la commande effacent d'abord cette ligne, que le minuteur redessine ensuite. À la fin, une commande qui a duré au moins deux secondes affiche « zc audit terminé en 14 s. ». Rien ne change quand la sortie n'est pas un terminal, pour ne pas charger ce que lit un agent, ni pour `zc init`, qui pose des questions.
+
 ## Questions ouvertes
 
 - Disponibilité du nom `zot-clean` sur PyPI au moment de publier (D8).

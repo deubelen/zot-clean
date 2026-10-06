@@ -299,3 +299,31 @@ def test_cle_d_un_autre_compte_refusee_par_les_commandes(tmp_path, zotero, monke
         assert main([*commande, '--dossier', str(travail)]) == 1, commande
         assert 'il modifierait donc une autre bibliothèque' in capsys.readouterr().err, commande
     assert serveur.requetes == []
+
+
+def test_minuteur_sous_un_terminal(monkeypatch):
+    # D207 : sous un terminal, une ligne tenue à jour montre que la commande tourne, effacée avant chaque message, et
+    # la durée à la fin. Rien quand la sortie n'est pas un terminal.
+    import io
+    import sys
+    import time
+    from zot_clean.cli import Minuteur
+
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+    ecran, sortie = Terminal(), io.StringIO()
+    monkeypatch.setattr(sys, 'stdout', sortie)
+    monkeypatch.setattr(sys, 'stderr', ecran)
+    with Minuteur('zc audit', intervalle=0.05, seuil=0):
+        print('message de la commande', file=sys.stderr)
+        time.sleep(0.2)
+        print('résultat')
+    texte = ecran.getvalue()
+    assert texte.startswith('zc audit en cours… 0 s') and '\r\x1b[Kmessage de la commande\n' in texte
+    assert texte.endswith('zc audit terminé en 0 s.\n') and sortie.getvalue() == 'résultat\n'
+    assert sys.stdout is sortie and sys.stderr is ecran
+    muet = io.StringIO()
+    with Minuteur('zc audit', muet, seuil=0):
+        pass
+    assert muet.getvalue() == ''

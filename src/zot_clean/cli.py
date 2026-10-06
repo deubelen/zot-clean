@@ -1,9 +1,11 @@
 """Ligne de commande `zc`."""
 
 import argparse
+import contextlib
 import json
 import re
 import sys
+import threading
 import time
 from datetime import date, datetime
 from pathlib import Path
@@ -1243,6 +1245,82 @@ def _enregistrer_duree(args, argv: list[str], debut: float, code: int) -> None:
         pass
 
 
+COMMANDES_INTERACTIVES = {'init'}  # elles posent des questions, qu'une ligne tenue à jour effacerait
+
+
+class _Ecran:
+    """Sortie d'un terminal partagée avec la ligne du minuteur : chaque écriture efface d'abord cette ligne, que le
+    minuteur redessine ensuite, pour que les messages de la commande ne s'y mêlent pas."""
+
+    def __init__(self, reel, minuteur):
+        self.reel, self.minuteur = reel, minuteur
+
+    def write(self, texte):
+        with self.minuteur.verrou:
+            self.minuteur.effacer()
+            return self.reel.write(texte)
+
+    def __getattr__(self, nom):
+        return getattr(self.reel, nom)
+
+
+class Minuteur:
+    """Sous un terminal, « zc audit en cours… 12 s » s'affiche dès le lancement et se met à jour chaque seconde, puis
+    « zc audit terminé en 14 s. » si la commande a duré (D207). Rien quand la sortie n'est pas un terminal (un agent
+    qui lit la sortie), ni pour une commande qui pose des questions."""
+
+    def __init__(self, nom: str, flux=None, intervalle: float = 1.0, seuil: float = 2.0):
+        self.nom, self.flux, self.intervalle, self.seuil = nom, flux or sys.stderr, intervalle, seuil
+        self.verrou, self.fin, self.affiche = threading.RLock(), threading.Event(), False
+        self.actif = hasattr(self.flux, 'isatty') and self.flux.isatty()
+
+    def effacer(self):
+        if self.affiche:
+            self.flux.write('\r\x1b[K')
+            self.affiche = False
+
+    def _dessiner(self):
+        with self.verrou:
+            sys.stdout.flush()
+            self.effacer()
+            self.flux.write(f'{self.nom} en cours… {int(time.monotonic() - self.debut)} s')
+            self.flux.flush()
+            self.affiche = True
+
+    def _boucle(self):
+        while not self.fin.wait(self.intervalle):
+            self._dessiner()
+
+    def __enter__(self):
+        self.debut = time.monotonic()
+        if self.actif:
+            self.anciens = sys.stdout, sys.stderr
+            sys.stdout, sys.stderr = _Ecran(sys.stdout, self), _Ecran(sys.stderr, self)
+            self._dessiner()
+            self.fil = threading.Thread(target=self._boucle, daemon=True)
+            self.fil.start()
+        return self
+
+    def __exit__(self, *exc):
+        if not self.actif:
+            return False
+        self.fin.set()
+        self.fil.join()
+        with self.verrou:
+            self.effacer()
+            sys.stdout, sys.stderr = self.anciens
+            duree = time.monotonic() - self.debut
+            if duree >= self.seuil:
+                self.flux.write(f'{self.nom} terminé en {_duree(duree)}.\n')
+            self.flux.flush()
+        return False
+
+
+def _duree(secondes: float) -> str:
+    m, s = divmod(int(secondes), 60)
+    return f'{m} min {s:02d} s' if m else f'{s} s'
+
+
 def executer(args) -> int:
     """Lance la commande. Tout refus ou échec sort avec un code non nul et son message sur la sortie d'erreur, pour
     qu'un agent qui teste le code de retour le voie (répétition du pilote). Les refus des modules passent par
@@ -1250,8 +1328,11 @@ def executer(args) -> int:
     commande se partagent une seule copie (`lecture.partager`)."""
     from zot_clean import lecture
     from zot_clean.ecriture import ErreurAPI, Refus
+    commande = getattr(args, 'commande', None)
+    nom = ' '.join(x for x in ('zc', commande, getattr(args, 'sous_commande', None)) if x)
+    minuteur = Minuteur(nom) if commande not in COMMANDES_INTERACTIVES else contextlib.nullcontext()
     try:
-        with lecture.partager():
+        with lecture.partager(), minuteur:
             code = args.action(args)
     except SystemExit as e:
         if e.code is None or isinstance(e.code, int):

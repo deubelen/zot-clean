@@ -1,6 +1,6 @@
 [project]
 name = "zot-clean"
-version = "0.3.1"
+version = "0.3.2"
 description = "Mettre et garder de l'ordre dans sa bibliothèque Zotero"
 readme = "README.md"
 license = "MIT"
