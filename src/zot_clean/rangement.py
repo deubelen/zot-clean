@@ -16,7 +16,9 @@ anciennes collections sont désignées par leur clé (D118).
 
 Le plan a un groupe par collection cible, dans l'ordre de l'arbre (D120),
 avec son changement de collection au rang 0 et les fiches qui y entrent au
-rang 1. Viennent ensuite projets et archives, les collections à mettre à la
+rang 1. Une fiche qui entre dans plusieurs collections va dans le groupe de
+la première, ou dans celui de la dernière créée par le plan si celle-ci vient
+plus loin, pour que son écriture ne précède jamais une création. Viennent ensuite projets et archives, les collections à mettre à la
 corbeille, les fiches à mettre à la corbeille, puis les racines (D112), qui
 ne sont renommées qu'à la demande.
 """
@@ -500,8 +502,15 @@ def planifier(b: Bibliotheque, cfg: Config, client: Client, avec_racines: bool =
         if sorted(apres) == sorted(avant):
             continue
         entrees = [k for k in apres if k not in avant]
-        ordre = min((ordre_de.get(k, (5, k)) for k in entrees), default=(5, 'fiches'))
-        g = groupe(ordre, chemin_vise(entrees[0]) if entrees else 'fiches retirées de collections')
+        # Groupe de la première collection où la fiche entre, sauf si elle entre aussi dans une collection créée par
+        # un groupe suivant : elle va alors dans le groupe de cette création, la dernière, pour ne jamais être écrite
+        # (à l'essai ou dans un paquet précédent) vers une collection qui n'existe pas encore.
+        cles_ordre = sorted(entrees, key=lambda k: _cle_tri(ordre_de.get(k, (5, k))))
+        creees = [k for k in cles_ordre if k in v.collections and v.collections[k].creation]
+        if creees and _cle_tri(ordre_de[creees[-1]]) > _cle_tri(ordre_de.get(cles_ordre[0], (5, cles_ordre[0]))):
+            cles_ordre.insert(0, creees[-1])
+        ordre = ordre_de.get(cles_ordre[0], (5, cles_ordre[0])) if cles_ordre else (5, 'fiches')
+        g = groupe(ordre, chemin_vise(cles_ordre[0]) if cles_ordre else 'fiches retirées de collections')
         g.operations.append(Operation(cle, {'collections': avant}, {'collections': apres}, rang=1,
                                       nature='rangement'))
 

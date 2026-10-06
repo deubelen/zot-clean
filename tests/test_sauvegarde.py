@@ -94,3 +94,25 @@ def test_noms_du_processus_zotero(monkeypatch):
     monkeypatch.setattr(sauvegarde.subprocess, 'run', faux_run)
     assert sauvegarde.zotero_ouvert() is False
     assert appels == [['pgrep', '-i', '-x', 'zotero|zotero-bin']]
+
+
+def test_au_moins_une_sauvegarde_conservee(cfg, tmp_path):
+    from zot_clean import config
+    (tmp_path / 'config.toml').write_text('[zotero]\ndossier = "/nulle/part"\n\n[sauvegarde]\nconserver = 0\n',
+                                          encoding='utf-8')
+    with pytest.raises(SystemExit, match='au moins 1'):
+        config.charger(tmp_path)
+    # Une configuration construite sans config.toml garde quand même la sauvegarde qu'elle vient de faire.
+    cfg.sauvegarde.conserver = 0
+    info = sauvegarde.sauvegarder(cfg, ouvert=lambda: False)
+    assert info.dossier.is_dir() and [i.dossier for i in sauvegarde.lister(cfg)] == [info.dossier]
+
+
+def test_sauvegarde_d_un_autre_dossier_zotero(cfg, tmp_path):
+    """Un dossier de sauvegardes commun à deux bibliothèques : celle de l'autre ne compte pas comme récente."""
+    cfg.sauvegarde.dossier = tmp_path / 'sauvegardes'
+    sauvegarde.sauvegarder(cfg, ouvert=lambda: False)
+    assert sauvegarde.recente(cfg) is not None
+    autre = Config(dossier_travail=cfg.dossier_travail, dossier_zotero=tmp_path / 'AutreZotero')
+    autre.sauvegarde.dossier = cfg.sauvegarde.dossier
+    assert sauvegarde.recente(autre) is None

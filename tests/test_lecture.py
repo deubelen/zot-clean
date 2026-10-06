@@ -212,3 +212,57 @@ def test_report_de_la_corbeille_et_des_suppressions(zotero):
     assert b.annotation_de == {a2: pj5} and b.annotations.get(pj2, 0) == 0 and b.annotations[pj5] == 1
     assert b.couleurs == [] and 'tagColors' not in b.reglages
     assert b.recherches_tags == [('Renommée', 'is', 'lu')]
+
+
+def test_une_seule_copie_par_commande(zotero, monkeypatch):
+    # Dans un bloc `partager()`, les lectures se partagent une copie de la base, refaite seulement si Zotero a écrit
+    # dans la base depuis. Hors d'un tel bloc, chaque lecture fait la sienne.
+    import os
+    import shutil
+    base = zotero.enregistrer()
+    copies, copier = [], shutil.copy2
+
+    def compter(source, cible):
+        copies.append(source)
+        copier(source, cible)
+    monkeypatch.setattr(lecture.shutil, 'copy2', compter)
+    with lecture.partager():
+        lecture.etat_synchronisation(base)
+        lecture.lire(base)
+        lecture.lire_types(base)
+        with lecture.partager():
+            assert lecture.lire(base).fiches == []
+        assert len(copies) == 1
+        dossier = lecture._partage['dossier']
+        zotero.fiche('Ajoutée par Zotero pendant la commande')
+        zotero.enregistrer()
+        os.utime(base, (1, 10 ** 9))  # date changée de plusieurs secondes : Windows date au dixième de µs
+        assert [e.titre for e in lecture.lire(base).fiches] == ['Ajoutée par Zotero pendant la commande']
+        assert len(copies) == 2
+        lecture.lire_types(base)
+        assert len(copies) == 2
+    assert not dossier.exists() and lecture._partage is None
+    lecture.lire(base)
+    lecture.lire(base)
+    assert len(copies) == 4
+
+
+def test_compte_synchronise(zotero):
+    """Compte zotero.org retenu par Zotero à la première synchronisation (`settings`, `setting = 'account'`)."""
+    zotero.compte(777, 'durand')
+    base = zotero.enregistrer()
+    assert lecture.compte_synchronise(base) == lecture.Compte(777, 'durand') == lecture.lire(base).compte
+    zotero.compte(None)
+    zotero.enregistrer()
+    assert lecture.compte_synchronise(base) == lecture.Compte() and lecture.Compte().id is None
+
+
+def test_note_propre_d_une_piece_jointe(zotero):
+    # D206 : Zotero range la note d'une pièce jointe dans `itemNotes`, sans parent. Ce n'est pas une note isolée.
+    f = zotero.fiche('Fiche')
+    notee = zotero.pdf(f, 'a.pdf', note='<p>Lu en 2024</p>')
+    vide = zotero.pdf(f, 'b.pdf')
+    note = zotero.note(f)
+    b = lecture.lire(zotero.enregistrer())
+    assert b.notes == {note: f}
+    assert b.pieces[notee].note and not b.pieces[vide].note

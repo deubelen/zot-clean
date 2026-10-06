@@ -228,3 +228,74 @@ def test_tilde_developpe(tmp_path, monkeypatch):
     monkeypatch.setenv('USERPROFILE', str(tmp_path))
     args = analyseur().parse_args(['init', '~/Zotero-travail', '--dossier-zotero', '~/Zotero'])
     assert args.dossier == tmp_path / 'Zotero-travail' and args.dossier_zotero == tmp_path / 'Zotero'
+
+
+def test_hors_d_un_dossier_de_travail(tmp_path, zotero, monkeypatch, capsys):
+    """Un config.toml étranger dans un dossier parent n'est pas pris pour celui de zc, et une commande lancée hors d'un
+    dossier de travail est refusée sans rien créer."""
+    from zot_clean import config
+    zotero.enregistrer()
+    (tmp_path / 'config.toml').write_text('[tool.autre]\nnom = "x"\n', encoding='utf-8')  # celui d'un autre logiciel
+    ailleurs = tmp_path / 'ailleurs'
+    ailleurs.mkdir()
+    monkeypatch.chdir(ailleurs)
+    assert config.trouver_dossier() is None
+    assert main(['audit', '--hors-ligne']) == 1
+    assert 'Aucun dossier de travail de zot-clean' in capsys.readouterr().err
+    assert sorted(p.name for p in ailleurs.iterdir()) == [] and not (tmp_path / 'rapports').exists()
+    monkeypatch.chdir(tmp_path)
+    assert main(['audit', '--hors-ligne']) == 1
+    assert "n'est pas reconnu" in capsys.readouterr().err and not (tmp_path / 'rapports').exists()
+    assert main(['audit', '--hors-ligne', '--dossier', str(ailleurs)]) == 1
+    assert "n'est pas un dossier de travail" in capsys.readouterr().err
+    # Un vrai dossier de travail plus haut est retrouvé, par-dessus le config.toml étranger d'un sous-dossier.
+    travail = tmp_path / 'travail'
+    (travail / 'projet').mkdir(parents=True)
+    (travail / 'config.toml').write_text(f'[zotero]\ndossier = "{zotero.dossier.as_posix()}"\n', encoding='utf-8')
+    (travail / 'projet' / 'config.toml').write_text('titre = "pas zc"\n', encoding='utf-8')
+    monkeypatch.chdir(travail / 'projet')
+    assert config.trouver_dossier() == travail.resolve()
+    assert main(['audit', '--hors-ligne', '--sans-empreintes']) == 0
+    assert (travail / 'rapports').is_dir() and not (travail / 'projet' / 'rapports').exists()
+
+
+@pytest.mark.parametrize('arguments, attendu', [
+    ('fonds a-ranger --examinees', 'argument --examinees : au moins une valeur attendue'),
+    ('audit --dossier', 'argument --dossier : une valeur attendue'),
+    ('appliquer', 'arguments obligatoires manquants : plan'),
+    ('appliquer x --essai --tout', "argument --tout : incompatible avec l'argument --essai"),
+    ('inbox inconnue', "choix invalide : 'inconnue'"),
+    ('audit en trop', 'arguments non reconnus : en trop'),
+])
+def test_erreurs_d_arguments_en_francais(arguments, attendu, capsys):
+    with pytest.raises(SystemExit) as fin:
+        main(arguments.split())
+    assert fin.value.code == 2
+    erreur = capsys.readouterr().err
+    assert attendu in erreur and ': error:' not in erreur and 'expected' not in erreur
+
+
+def test_cle_d_un_autre_compte_refusee_par_les_commandes(tmp_path, zotero, monkeypatch, capsys):
+    """Audit, lecture et planification refusent la clé d'un autre compte que celui que Zotero synchronise, avant
+    toute requête. `--hors-ligne`, qui ne se sert pas de la clé, fait l'audit de la copie locale, avec un
+    avertissement."""
+    from faux_serveur import FauxServeur
+    from zot_clean import ecriture
+    serveur = FauxServeur(utilisateur=9999)
+    zotero.fiche('Une fiche', cle='AAAAAAAA')
+    zotero.enregistrer()
+    travail = tmp_path / 'travail'
+    travail.mkdir()
+    (travail / 'config.toml').write_text(f'[zotero]\ndossier = "{zotero.dossier.as_posix()}"\n', encoding='utf-8')
+    monkeypatch.setattr(ecriture, 'depuis_config', lambda cfg: serveur.client())
+    assert main(['audit', '--sans-empreintes', '--dossier', str(travail)]) == 1
+    erreur = capsys.readouterr().err
+    assert 'La clé API est celle du compte zotero.org n° 9999' in erreur and 'n° 4242' in erreur
+    assert '`zc audit --hors-ligne`' in erreur and not (travail / 'rapports').exists()
+    assert main(['audit', '--hors-ligne', '--sans-empreintes', '--dossier', str(travail)]) == 0
+    assert capsys.readouterr().out.startswith('Attention. La clé API est celle du compte zotero.org n° 9999')
+    for commande in (['voir', 'AAAAAAAA'], ['doublons', 'chercher'], ['doublons', 'planifier'], ['tags', 'planifier'],
+                     ['inbox', 'preparer']):
+        assert main([*commande, '--dossier', str(travail)]) == 1, commande
+        assert 'il modifierait donc une autre bibliothèque' in capsys.readouterr().err, commande
+    assert serveur.requetes == []

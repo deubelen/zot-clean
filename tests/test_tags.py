@@ -464,6 +464,57 @@ def test_decisions_par_commande(monde, cfg):
     assert (rouge.sort, rouge.source, rouge.decision, rouge.effectif) == (t.SUPPRIMER, t.UTILISATEUR, t.ACCEPTER, 1)
 
 
+NFC, NFD, MELE = 'été', 'été', 'été'  # même nom affiché, trois formes Unicode
+
+
+def test_decisions_par_commande_sous_plusieurs_formes_unicode(cfg):
+    """Deux entrées dont les noms ne diffèrent que par la forme Unicode s'affichent pareil. Le nom exact désigne la
+    sienne seule. Une autre forme est refusée quand elle en désigne plusieurs, avec leurs points de code."""
+    s = t.Suivi(tags=[t.Entree(NFC, sort=t.GARDER), t.Entree(NFD, sort=t.GARDER), t.Entree('ok', sort=t.GARDER)],
+                variantes=[t.Variantes([NFC, 'ete'], 'été (a)'), t.Variantes([NFD, 'Ete'], 'été (b)'),
+                           t.Variantes(['hiver', 'Hiver'], 'hiver')])
+    assert t.decider(s, cfg, t.ACCEPTER, [NFC]) == 1
+    assert [e.decision for e in s.tags] == [t.ACCEPTER, '', '']
+    with pytest.raises(SystemExit, match=r"forme Unicode.*'\\xe9t\\xe9'.*'e\\u0301te\\u0301'"):
+        t.decider(s, cfg, t.ACCEPTER, ['ok', MELE])
+    assert s.tags[2].decision == ''  # rien n'a changé avant le refus
+    assert t.decider(s, cfg, t.REFUSER, [NFD]) == 1 and s.tags[1].decision == t.REFUSER
+    # Même logique pour les groupes, désignés par l'un de leurs noms.
+    with pytest.raises(SystemExit, match='forme Unicode'):
+        t.decider(s, cfg, t.ACCEPTER, variantes=[MELE])
+    assert t.decider(s, cfg, t.ACCEPTER, variantes=[NFD]) == 1
+    assert [g.decision for g in s.variantes] == ['', t.ACCEPTER, '']
+    # Un groupe qui porte lui-même plusieurs formes du nom reste désigné par chacune, sans refus.
+    s = t.Suivi(variantes=[t.Variantes([NFC, NFD], 'été')])
+    assert t.decider(s, cfg, t.ACCEPTER, variantes=[MELE]) == 1 and s.variantes[0].decision == t.ACCEPTER
+
+
+def test_ajouter_enregistre_le_nom_reel_du_tag(zotero, tmp_path):
+    """`zc tags ajouter` retient le nom tel qu'il est porté dans la bibliothèque, pour que la règle s'y applique, et
+    refuse un nom qui désigne plusieurs tags ne différant que par leur forme Unicode."""
+    cfg = Config(dossier_travail=tmp_path / 'travail', dossier_zotero=zotero.dossier)
+    cfg.dossier_travail.mkdir()
+    a = zotero.fiche('A', tags=(NFD, 'café', 'reste'))  # « été » décomposé, « café » composé
+    b = lecture.lire(zotero.enregistrer())
+    s = t.Suivi()
+    assert t.ajouter(s, cfg, b, [NFC, 'cafe\u0301'], 'supprimer') == 2
+    assert [e.nom for e in s.tags] == ['café', NFD] and [e.effectif for e in s.tags] == [1, 1]
+    with pytest.raises(SystemExit, match='déjà une entrée'):
+        t.ajouter(s, cfg, b, [MELE], 'garder')
+    t.ecrire(cfg, s, b)
+    relu = t.charger(cfg)
+    assert [e.nom for e in relu.tags] == ['café', NFD]
+    R = t.regles(relu, cfg, b)
+    assert t.tags_vises(b.elements[a], R) == [{'tag': 'reste'}]
+    # Deux tags réels sous deux formes, et un nom tapé sous une troisième, qui n'en désigne aucun exactement.
+    zotero.fiche('B', tags=(NFC,))
+    b = lecture.lire(zotero.enregistrer())
+    with pytest.raises(SystemExit, match=r"plusieurs tags.*'\\xe9t\\xe9'.*'e\\u0301te\\u0301'"):
+        t.ajouter(t.Suivi(), cfg, b, [MELE], 'supprimer')
+    s = t.Suivi()
+    assert t.ajouter(s, cfg, b, [NFC], 'supprimer') == 1 and [e.nom for e in s.tags] == [NFC]
+
+
 def test_marque_technique_jamais_proposee_en_concept(zotero, tmp_path):
     from zot_clean import tags as tg
     from zot_clean.config import Config

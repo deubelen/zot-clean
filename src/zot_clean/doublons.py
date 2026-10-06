@@ -7,10 +7,19 @@ groupe jugé distinct n'est plus proposé, ni signalé par l'audit.
 
 `planifier` construit, pour chaque groupe à fusionner, un plan qui fait ce
 que fait la fusion de Zotero. Les enfants des fiches absorbées sont rattachés
-à la fiche conservée (rang 0), la fiche conservée est complétée (rang 1), les
-fiches absorbées vont à la corbeille (rang 2). Les données viennent de l'API,
-les empreintes des pièces jointes des fichiers locaux, puisque le `md5` de
-l'API est vide quand les fichiers sont synchronisés par WebDAV.
+à la fiche conservée (rang 0), la fiche conservée est complétée et les fiches
+liées aux absorbées pointent vers elle (rang 1), les fiches absorbées vont à
+la corbeille (rang 2). Les données viennent de l'API, les empreintes des
+pièces jointes des fichiers locaux, puisque le `md5` de l'API est vide quand
+les fichiers sont synchronisés par WebDAV.
+
+Les relations suivent `moveRelations` de Zotero (`chrome/content/zotero/
+mergeItems.mjs`). Celles d'une absorbée passent sur la fiche conservée, sauf
+un lien vers une fiche du groupe, l'absorbée perd ses `dc:replaces`, la fiche
+conservée gagne un `dc:replaces` vers elle, et une fiche liée qui pointait
+vers l'absorbée pointe vers la fiche conservée. Les groupes d'un même plan
+s'enchaînent comme des fusions successives, chacun partant des relations
+laissées par les précédents.
 """
 
 import json
@@ -23,13 +32,19 @@ from zot_clean.cles import base_de
 from zot_clean.audit import _doi, _isbns, annee, ecrire_toml, ligne, md5, nom_type, norm
 from zot_clean.config import Config
 from zot_clean.ecriture import Client
-from zot_clean.lecture import Bibliotheque, Element
+from zot_clean.lecture import Bibliotheque, Element, note_non_vide
 from zot_clean.plans import Groupe, Operation, Plan
+from zot_clean.sources import titres_concordants
 
 FICHIER = 'doublons.toml'
 FUSIONNER, DISTINCT = 'fusionner', 'distinct'
 SUR, A_JUGER = 'sûr', 'à juger'
+# Un même DOI ne fait un groupe sûr qu'avec des titres concordants, au seuil des correspondances évidentes de
+# l'étape 3 (`metadonnees.SEUIL_EVIDENT`). À 0,8, un erratum (« Erratum to: <titre> ») passerait encore.
+SEUIL_TITRES = 0.9
 ENFANTS = {'attachment': 'la pièce jointe', 'note': 'la note'}
+REMPLACE = 'dc:replaces'  # prédicat de Zotero qui garde la trace d'une fusion
+COMPLETER = 'compléter la fiche conservée'
 NE_PAS_COPIER = {'key', 'version', 'itemType', 'dateAdded', 'dateModified', 'collections', 'tags', 'relations',
                  'creators', 'deleted', 'parentItem'}
 
@@ -89,11 +104,14 @@ def candidats(b: Bibliotheque) -> list[list[Element]]:
 
 
 def classer(g: list[Element]) -> str:
-    """Sûr, un groupe de même type qui partage le DOI, ou le titre, les créateurs et l'année (D49)."""
+    """Sûr, un groupe de même type qui partage le DOI et des titres concordants, ou le titre, les créateurs et
+    l'année (D49). Un chapitre importé avec le DOI de l'ouvrage, ou un erratum saisi avec celui de l'article,
+    partage le DOI sans être un doublon : sans titres concordants, le groupe est à juger."""
     if len({e.type for e in g}) > 1:
         return A_JUGER
     dois = {_doi(e.champs.get('DOI', '')) for e in g}
-    if len(dois) == 1 and '' not in dois and g[0].type != 'bookSection':
+    if (len(dois) == 1 and '' not in dois and g[0].type != 'bookSection'
+            and all(titres_concordants(g[0].titre, e.titre, SEUIL_TITRES) for e in g[1:])):
         return SUR
     signatures = {(norm(e.titre), tuple(norm(n) for n, _ in e.createurs), annee(e)) for e in g}
     return SUR if len(signatures) == 1 and next(iter(signatures))[0] else A_JUGER
@@ -263,7 +281,8 @@ class _Fichiers:
 
     def annotee(self, cle: str) -> bool:
         e = self.par_cle.get(cle)
-        return bool(e and (self.b.annotations.get(e.id) or e.id in self.parents_de_notes))
+        return bool(e and (self.b.annotations.get(e.id) or e.id in self.parents_de_notes
+                           or (e.id in self.b.pieces and self.b.pieces[e.id].note)))  # note propre (D206)
 
 
 def _nb_pj(enfants: list[dict]) -> int:
@@ -276,8 +295,98 @@ def _choisir(items: list[dict], enfants: dict[str, list[dict]], conserver: str) 
     return sorted(items, key=lambda d: (-_nb_pj(enfants[d['key']]), d.get('dateAdded', '')))[0]
 
 
-def _fusion(m: dict, autres: list[dict], enfants: dict[str, list[dict]], forcer: dict, uri, fichiers: _Fichiers,
-            cache: bool = False):
+def _liste(v) -> list[str]:
+    return [v] if isinstance(v, str) else list(v or [])
+
+
+def _relations(d: dict) -> dict[str, list[str]]:
+    """Relations d'un élément, une liste d'adresses par prédicat (l'API donne une chaîne pour une seule)."""
+    return {p: _liste(v) for p, v in (d.get('relations') or {}).items() if _liste(v)}
+
+
+def _ajouter(relations: dict, p: str, o: str) -> None:
+    if o not in relations.setdefault(p, []):
+        relations[p].append(o)
+
+
+class _Liens:
+    """Relations prévues par les groupes déjà planifiés, pour que chaque groupe parte de l'état laissé par les
+    précédents, comme des fusions successives dans Zotero, et que `avant` corresponde à ce que le socle relira."""
+
+    def __init__(self, client: Client, masquees: set[str]):
+        self.client, self.masquees = client, masquees
+        self.prevues: dict[str, dict] = {}
+        self.absorbees: set[str] = set()
+        self.lues: dict[str, dict | None] = {}
+        self.prefixe = client.uri('')  # adresse des fiches de cette bibliothèque, à la clé près
+
+    def de(self, d: dict) -> dict[str, list[str]]:
+        return json.loads(json.dumps(self.prevues.get(d['key'], _relations(d))))
+
+    def gardee(self, m: dict, autres: list[dict]) -> dict:
+        """Relations de la fiche conservée. Celles des absorbées y passent, sauf un lien vers une fiche du groupe
+        (Zotero écarte le lien vers la fiche conservée, zc aussi vers une autre absorbée, elle aussi à la
+        corbeille), puis un `dc:replaces` vers chaque absorbée. Les liens qu'elle avait déjà restent."""
+        relations, groupe = self.de(m), {self.client.uri(d['key']) for d in [m, *autres]}
+        for d in autres:
+            for p, objets in self.de(d).items():
+                for o in objets:
+                    if o not in groupe:
+                        _ajouter(relations, p, o)
+            _ajouter(relations, REMPLACE, self.client.uri(d['key']))
+        return relations
+
+    def liees(self, m: dict, autres: list[dict]) -> list[Operation]:
+        """Fiches hors du groupe qui pointent vers une absorbée : leur lien passe à la fiche conservée (rang 1).
+        Elles se trouvent par les liens de l'absorbée, que Zotero pose des deux côtés (« Connexe »), et parmi les
+        relations déjà prévues par le plan. Une fiche absorbée par un groupe précédent n'est pas touchée."""
+        cles_groupe = {d['key'] for d in [m, *autres]}
+        uris = {self.client.uri(d['key']): d['key'] for d in autres}
+        candidates = {o[len(self.prefixe):] for d in autres for p, objets in self.de(d).items() if p != REMPLACE
+                      for o in objets if o.startswith(self.prefixe)}
+        candidates |= {k for k, r in self.prevues.items()
+                       if any(o in uris for p, objets in r.items() if p != REMPLACE for o in objets)}
+        candidates -= cles_groupe | self.absorbees
+        if (a_lire := sorted(k for k in candidates if k not in self.lues)):
+            lues = self.client.fiches(a_lire)
+            self.lues.update({k: lues.get(k) for k in a_lire})
+        ops, vers = [], self.client.uri(m['key'])
+        for k in sorted(candidates):
+            if self.lues.get(k) is None:  # supprimée pour de bon, ou adresse d'une autre bibliothèque
+                continue
+            avant = self.de(self.lues[k])
+            apres, sources = json.loads(json.dumps(avant)), []
+            for p, objets in apres.items():
+                if p == REMPLACE:
+                    continue
+                for o in [o for o in objets if o in uris]:
+                    objets.remove(o)
+                    if vers not in objets:
+                        objets.append(vers)
+                    sources.append(uris[o])
+            if not sources:
+                continue
+            self.prevues[k] = apres
+            masque = f' {filtre.MASQUE}' if k in self.masquees else ''
+            ops.append(Operation(k, {'relations': avant}, {'relations': apres}, 1,
+                                 f"fiche liée {k}{masque} : son lien vers {', '.join(dict.fromkeys(sources))} "
+                                 f"passe à {m['key']}"))
+        return ops
+
+    def corbeille(self, d: dict) -> tuple[dict, dict]:
+        """Avant et après de la mise à la corbeille d'une absorbée, qui perd ses `dc:replaces`, passés sur la fiche
+        conservée, pour qu'un élément remplacé n'ait pas deux remplaçants (Zotero)."""
+        self.absorbees.add(d['key'])
+        relations = self.de(d)
+        if REMPLACE not in relations:
+            return {'deleted': False}, {'deleted': True}
+        sans = {p: o for p, o in relations.items() if p != REMPLACE}
+        self.prevues[d['key']] = sans
+        return {'deleted': False, 'relations': relations}, {'deleted': True, 'relations': sans}
+
+
+def _fusion(m: dict, autres: list[dict], enfants: dict[str, list[dict]], forcer: dict, liens: _Liens,
+            fichiers: _Fichiers, cache: bool = False):
     """Opérations de la fusion et valeurs différentes. Avec `cache`, les natures ne citent aucun titre (D126)."""
     valides = set(m) - NE_PAS_COPIER
     maj = {}
@@ -311,15 +420,7 @@ def _fusion(m: dict, autres: list[dict], enfants: dict[str, list[dict]], forcer:
                 tags.append(t)
     if len(tags) != len(m.get('tags', [])):
         maj['tags'] = tags
-    relations = json.loads(json.dumps(m.get('relations') or {}))
-    remplace = relations.get('dc:replaces', [])
-    remplace = [remplace] if isinstance(remplace, str) else list(remplace)
-    for d in autres:
-        remplace.append(uri(d['key']))
-        r = (d.get('relations') or {}).get('dc:replaces', [])
-        remplace += [r] if isinstance(r, str) else r
-    relations['dc:replaces'] = list(dict.fromkeys(remplace))
-    maj['relations'] = relations
+    maj['relations'] = liens.gardee(m, autres)
 
     ops = []
     empreintes = {fichiers.empreinte(k['key']) for k in enfants[m['key']] if k['itemType'] == 'attachment'} - {''}
@@ -327,23 +428,33 @@ def _fusion(m: dict, autres: list[dict], enfants: dict[str, list[dict]], forcer:
         for k in enfants[d['key']]:
             h = fichiers.empreinte(k['key']) if k['itemType'] == 'attachment' else ''
             annotee = fichiers.annotee(k['key'])
-            if h and h in empreintes and not k.get('tags') and not annotee:
+            # Note de la pièce jointe elle-même (champ `note` de l'élément), que Zotero reporte en fusionnant.
+            notee = k['itemType'] == 'attachment' and note_non_vide(k.get('note'))  # vide, Zotero l'enveloppe
+            if h and h in empreintes and not k.get('tags') and not annotee and not notee:
                 ops.append(Operation(k['key'], {'deleted': False}, {'deleted': True}, 0,
                                      'pièce jointe identique à la corbeille'
                                      + ('' if cache else f" : {k.get('title', '')}"), enfants=[]))
             else:
-                # Une copie identique mais annotée ou taguée n'est jamais mise à la corbeille (D51, D125).
-                pourquoi = (f" (identique à une copie déjà présente, gardée pour ses {'annotations ou notes' if annotee else 'tags'})"
+                # Une copie identique mais annotée, notée ou taguée n'est jamais mise à la corbeille (D51, D125).
+                garde = ('sa note de pièce jointe' if notee else 'ses annotations ou notes' if annotee
+                         else 'ses tags')
+                pourquoi = (f' (identique à une copie déjà présente, gardée pour {garde})'
                             if h and h in empreintes else '')
+
                 # Le texte d'une note ne sort jamais du journal (D191).
                 ops.append(Operation(k['key'], {'parentItem': d['key']}, {'parentItem': m['key']}, 0,
                                      f"rattacher {ENFANTS.get(k['itemType'], k['itemType'])}"
                                      + ('' if cache or not k.get('title') else f" : {k['title']}") + pourquoi))
                 if h:
                     empreintes.add(h)
-    ops.append(Operation(m['key'], {f: plans.brute(m, f) for f in maj}, maj, 1, 'compléter la fiche conservée'))
-    ops += [Operation(d['key'], {'deleted': False}, {'deleted': True}, 2, 'fiche absorbée à la corbeille',
-                      enfants=[k['key'] for k in enfants[d['key']]]) for d in autres]
+    avant = {f: plans.brute(m, f) for f in maj} | {'relations': liens.de(m)}
+    ops.append(Operation(m['key'], avant, maj, 1, COMPLETER))
+    liens.prevues[m['key']] = maj['relations']
+    ops += liens.liees(m, autres)
+    for d in autres:
+        avant, apres = liens.corbeille(d)
+        ops.append(Operation(d['key'], avant, apres, 2, 'fiche absorbée à la corbeille',
+                             enfants=[k['key'] for k in enfants[d['key']]]))
     return ops, differences
 
 
@@ -351,12 +462,15 @@ def _court(v) -> str:
     return repr(v if not isinstance(v, (list, dict)) else json.dumps(v, ensure_ascii=False))[:70]
 
 
-def planifier(cfg: Config, client: Client, b: Bibliotheque, avec_surs: bool = False) -> tuple[Plan, str]:
+def planifier(cfg: Config, client: Client, b: Bibliotheque) -> tuple[Plan, str]:
+    """Plan de fusion des seuls groupes décidés « fusionner ». Un groupe sûr sans décision n'y entre pas, il s'accepte
+    d'abord par `zc doublons accepter --surs` (D49)."""
     entrees = charger_suivi(cfg)
-    choisies = [e for e in entrees if e.decision == FUSIONNER or (avec_surs and e.classe == SUR and not e.decision)]
+    choisies = [e for e in entrees if e.decision == FUSIONNER]
     donnees = client.fiches([k for e in choisies for k in e.cles])
     fichiers = _Fichiers(b)
     masquees = filtre.cles_masquees(b, cfg)
+    liens = _Liens(client, masquees)
     groupes, refus, details = [], [], []
     for e in choisies:
         items = [donnees.get(k) for k in e.cles]
@@ -379,13 +493,13 @@ def planifier(cfg: Config, client: Client, b: Bibliotheque, avec_surs: bool = Fa
         m = _choisir(items, enfants, e.conserver)
         autres = [d for d in items if d['key'] != m['key']]
         cache = any(k in masquees for k in e.cles)
-        ops, differences = _fusion(m, autres, enfants, e.forcer, client.uri, fichiers, cache)
+        ops, differences = _fusion(m, autres, enfants, e.forcer, liens, fichiers, cache)
         gid = str(len(groupes) + 1)
         groupes.append(Groupe(gid, filtre.MASQUE if cache else m.get('title', '')[:80], ops))
         details.append(_detail(gid, m, autres, enfants, ops, differences, cache))
     plan = Plan('doublons', client.utilisateur, groupes,
                 description=f'Fusion de {len(groupes)} groupe(s) de doublons.')
-    a_juger = sum(1 for e in entrees if not e.decision and not (avec_surs and e.classe == SUR))
+    a_juger = sum(1 for e in entrees if not e.decision)
     return plan, _rapport(plan, refus, details, a_juger, avertissement(b, cfg, plan))
 
 
@@ -394,7 +508,7 @@ def avertissement(b: Bibliotheque, cfg: Config, plan: Plan) -> str:
     identique, qui est alors rattachée à la fiche conservée au lieu d'aller à la corbeille."""
     from zot_clean import bbt
     from zot_clean.audit import rappel_absents
-    fiches = {op.cle for g in plan.groupes for op in g.operations if op.rang in (1, 2)}
+    fiches = {op.cle for g in plan.groupes for op in g.operations if op.rang == 2 or op.nature == COMPLETER}
     suite = ('. Une copie identique est alors rattachée à la fiche conservée au lieu d\'aller à la corbeille, '
              'et la fiche garde deux fois le même fichier')
     return rappel_absents(b, bbt.stockage_fichiers(cfg.dossier_zotero), suite, fiches) if fiches else ''
@@ -407,7 +521,8 @@ def _detail(gid, m, autres, enfants, ops, differences, cache: bool = False) -> l
          f"{_nb_pj(enfants[m['key']])} pièce(s) jointe(s), ajoutée le {m.get('dateAdded', '')[:10]})"]
     r += [f"- absorber {d['key']} ({nom_type(d['itemType'])}, {d.get('date', '') or 's. d.'}, "
           f"{_nb_pj(enfants[d['key']])} pièce(s) jointe(s), ajoutée le {d.get('dateAdded', '')[:10]})" for d in autres]
-    maj = next(op.apres for op in ops if op.rang == 1)
+    op_m = next(op for op in ops if op.cle == m['key'])
+    maj = op_m.apres
     champs = {k: v for k, v in maj.items() if k not in ('relations', 'collections', 'tags')}
     if champs:
         r.append('- champs complétés : ' + ', '.join(k if cache else f'{k} = {_court(v)}' for k, v in champs.items()))
@@ -415,7 +530,11 @@ def _detail(gid, m, autres, enfants, ops, differences, cache: bool = False) -> l
         r.append(f"- collections : {len(m.get('collections', []))} → {len(maj['collections'])}")
     if 'tags' in maj:
         r.append(f"- tags : {len(m.get('tags', []))} → {len(maj['tags'])}")
-    r += [f'- {op.nature}' for op in ops if op.rang == 0]
+    repris = sum(len(set(o) - set(op_m.avant['relations'].get(p, []))) for p, o in maj['relations'].items()
+                 if p != REMPLACE)
+    if repris:
+        r.append(f'- liens « Connexe » ou autres relations repris des fiches absorbées : {repris}')
+    r += [f'- {op.nature}' for op in ops if op.rang == 0 or op.rang == 1 and op.cle != m['key']]
     # Clé de citation d'une fiche absorbée qui disparaît avec elle (D146), signalée à part des autres différences.
     gardee = str(maj.get('citationKey') or m.get('citationKey') or '').strip()
     if (ancienne := str(m.get('citationKey') or '').strip()) and ancienne != gardee:
@@ -438,7 +557,8 @@ def _rapport(plan: Plan, refus: list, details: list[list[str]], a_juger: int, av
     r = ['# Fusion de doublons', '', *([f'**Attention.** {avert}', ''] if avert else []),
          f"{len(plan.groupes)} groupe(s) à fusionner, {plan.nb_operations} opération(s). Comme dans Zotero, les "
          "notes et pièces jointes passent sur la fiche conservée, les champs vides sont complétés, collections et "
-         "tags réunis, et les fiches absorbées vont à la corbeille avec un lien vers la fiche conservée.", '',
+         "tags réunis, les liens « Connexe » des fiches absorbées passent à la fiche conservée, de leur côté comme "
+         "de celui des fiches liées, et les fiches absorbées vont à la corbeille avec un lien vers la fiche conservée.", '',
          "Zotero vide la corbeille automatiquement (après 30 jours par défaut). Passé ce délai, une fusion n'est "
          "plus annulable par `zc annuler`.", '']
     if a_juger:

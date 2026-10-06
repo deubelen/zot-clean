@@ -610,10 +610,18 @@ def synchronisation(b: Bibliotheque) -> Section:
              f"{pluriel(len(b.cles_invalides), 'élément')} à clé invalide.")
     details = [f'clé invalide : {k}' for k in b.cles_invalides] + [f'non synchronisé : {t} ({n})'
                                                                    for t, n in non_sync.most_common()]
-    return Section('Synchronisation', A_VOIR if b.cles_invalides else (INFO if non_sync or cols else OK), texte,
-                   details, 'Quelques éléments non synchronisés sont normaux (modifications récentes). Une clé '
-                            'invalide bloque la synchronisation et doit être réparée avant tout nettoyage.',
-                   {k: f'clé invalide : {k}' for k in b.cles_invalides})
+    remede = ('Quelques éléments non synchronisés sont normaux (modifications récentes). Une clé invalide bloque la '
+              'synchronisation et doit être réparée avant tout nettoyage.')
+    points = {k: f'clé invalide : {k}' for k in b.cles_invalides}
+    if b.compte.id is None:  # le nettoyage écrit par zotero.org, toutes ses commandes refusent alors
+        texte = "Zotero n'a jamais synchronisé cette bibliothèque avec un compte zotero.org. " + texte
+        remede = ("Le nettoyage modifie la bibliothèque en passant par zotero.org, il demande la synchronisation. "
+                  "Dans Zotero, ouvrir Réglages › Synchronisation, se connecter à son compte zotero.org (le créer au "
+                  "besoin), synchroniser et attendre la fin, puis, si ce n'est fait, enregistrer la clé API avec "
+                  "`zc init`. " + remede)
+        points['compte'] = 'bibliothèque jamais synchronisée'
+    return Section('Synchronisation', A_VOIR if b.cles_invalides or b.compte.id is None
+                   else (INFO if non_sync or cols else OK), texte, details, remede, points)
 
 
 def auditer(b: Bibliotheque, cfg: Config, empreintes: bool = True, en_ligne: dict[str, bool] | None = None,

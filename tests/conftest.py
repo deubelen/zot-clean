@@ -33,6 +33,7 @@ class ZoteroFactice:
         shutil.copyfile(modele, self.base)
         self.db = sqlite3.connect(self.base)
         self._ids = itertools.count(1)
+        self.compte(4242)  # celui du faux serveur, `FauxServeur().utilisateur`
 
     def _cle(self, n: int) -> str:
         cle = ''
@@ -121,11 +122,14 @@ class ZoteroFactice:
 
     def pdf(self, parent: int, nom: str, contenu: bytes | None = b'%PDF-1.4 factice', cle: str | None = None,
             ajout: str = '2026-01-01', type_contenu: str = 'application/pdf', mode: int = 0, url: str = '',
-            titre: str = '', autres: tuple[str, ...] = (), tags=()) -> int:
+            titre: str = '', autres: tuple[str, ...] = (), tags=(), note: str = '') -> int:
         """Pièce jointe importée (`mode` 0), importée depuis une URL (1), liée (2) ou lien (3). `contenu=None` :
-        fichier absent du disque. `autres` : autres fichiers posés dans son dossier `storage/<CLÉ>/`."""
+        fichier absent du disque. `autres` : autres fichiers posés dans son dossier `storage/<CLÉ>/`. `note` : note
+        propre de la pièce jointe, que Zotero range dans `itemNotes` sans parent, enveloppée comme toute note."""
         iid, cle = self._element('attachment', cle, ajout=ajout)
         self.tags(iid, tags)
+        self.db.execute('insert into itemNotes (itemID, parentItemID, note) values (?, null, ?)',
+                        (iid, f'<div class="zotero-note znv1">{note}</div>'))
         chemin = f'/Documents/{nom}' if mode == 2 else ('' if mode == 3 else f'storage:{nom}')
         self.db.execute('insert into itemAttachments (itemID, parentItemID, linkMode, contentType, path) '
                         'values (?, ?, ?, ?, ?)', (iid, parent, mode, type_contenu, chemin))
@@ -164,6 +168,14 @@ class ZoteroFactice:
         """Version de la bibliothèque reçue du serveur, comme après une synchronisation."""
         self.db.execute('insert or replace into libraries (libraryID, type, editable, filesEditable, version) '
                         "values (1, 'user', 1, 1, ?)", (version,))
+
+    def compte(self, utilisateur: int | None, nom: str = 'durand') -> None:
+        """Compte zotero.org synchronisé par la base, comme Zotero le retient à la première synchronisation
+        (`settings`, `setting = 'account'`). None : base jamais synchronisée."""
+        self.db.execute("delete from settings where setting = 'account' and key in ('userID', 'username')")
+        if utilisateur is not None:
+            self.db.executemany("insert into settings values ('account', ?, ?)",
+                                [('userID', utilisateur), ('username', nom)])
 
     def enregistrer(self) -> Path:
         self.db.commit()

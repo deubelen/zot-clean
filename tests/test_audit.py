@@ -356,3 +356,53 @@ def test_inbox_vide_et_racines_dont_on_peut_se_passer(zotero):
     s = sections['Structure des collections']
     assert '0 collection vide' in s.resume and 'Racines de la méthode absentes : Projets, Archives.' in s.resume
     assert '`projets = []`, `archives = ""`' in s.remede and 'section [methode]' in s.remede
+
+
+def test_fichiers_en_ligne_retenus_d_un_audit_a_l_autre(zotero, tmp_path, monkeypatch, capsys):
+    # Un fichier trouvé sur zotero.org n'y est plus demandé tant que la version de sa pièce jointe ne change pas.
+    # Un fichier introuvable, ou d'une pièce jointe jamais synchronisée (version 0), est redemandé à chaque audit.
+    from faux_serveur import FauxServeur
+    from zot_clean import ecriture
+    from zot_clean.cli import main
+    serveur = FauxServeur()
+    f = zotero.fiche('A')
+    pieces = {nom: zotero.pdf(f, f'{nom}.pdf', None) for nom in ('en_ligne', 'perdu', 'neuf')}
+    for nom, version in (('en_ligne', 7), ('perdu', 8)):
+        zotero.db.execute('update items set version = ? where itemID = ?', (version, pieces[nom]))
+    cles = {nom: zotero.db.execute('select key from items where itemID = ?', (iid,)).fetchone()[0]
+            for nom, iid in pieces.items()}
+    serveur.fichiers = {cles['en_ligne'], cles['neuf']}
+    zotero.enregistrer()
+    travail = tmp_path / 'travail'
+    travail.mkdir()
+    (travail / 'config.toml').write_text(f'[zotero]\ndossier = "{zotero.dossier.as_posix()}"\n', encoding='utf-8')
+    monkeypatch.setattr(ecriture, 'depuis_config', lambda cfg: serveur.client())
+
+    def auditer_et_compter():
+        serveur.requetes.clear()
+        assert main(['audit', '--sans-empreintes', '--dossier', str(travail)]) == 0
+        demandes = sorted(chemin.split('/')[-2] for _, chemin in serveur.requetes if chemin.endswith('/file'))
+        return demandes, capsys.readouterr().out
+
+    demandes, premier = auditer_et_compter()
+    assert demandes == sorted(cles.values())
+    assert 'dont 2 encore sur zotero.org (récupérables) et 1 introuvable' in premier
+    demandes, second = auditer_et_compter()
+    assert demandes == sorted([cles['perdu'], cles['neuf']]) and second == premier
+    # Pièce jointe modifiée depuis (version reçue par la synchronisation) : redemandée.
+    zotero.db.execute('update items set version = 9 where itemID = ?', (pieces['en_ligne'],))
+    zotero.enregistrer()
+    serveur.fichiers.discard(cles['en_ligne'])
+    demandes, troisieme = auditer_et_compter()
+    assert demandes == sorted(cles.values()) and 'dont 1 encore sur zotero.org' in troisieme
+    # `--rafraichir` des sources vide `cache/*.json`, pas cette mémoire.
+    assert not list((travail / 'cache').glob('*.json')) and (travail / 'cache' / 'zotero').is_dir()
+
+
+def test_bibliotheque_jamais_synchronisee_signalee(zotero):
+    """Sans clé, l'audit fonctionne, et dit qu'il faudra la synchronisation pour nettoyer."""
+    assert auditer(zotero)[0]['Synchronisation'].statut == audit.OK
+    zotero.compte(None)
+    s = auditer(zotero)[0]['Synchronisation']
+    assert s.statut == audit.A_VOIR and s.resume.startswith("Zotero n'a jamais synchronisé")
+    assert 'Réglages › Synchronisation' in s.remede

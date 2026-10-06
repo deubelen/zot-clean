@@ -27,7 +27,7 @@ Dans `~/zc-test`, profil de test ouvert sauf pour la sauvegarde :
 
 1. `zc audit` signale doublons, métadonnées manquantes, tags automatiques, PDF identiques, fiche sans collection.
 2. `zc doublons chercher` propose trois groupes sûrs (même DOI à deux et à trois fiches, même titre), trois à juger (éditions de Robin, traduction de Vygotski, article et communication de Heylen) et laisse les deux chapitres tranquilles.
-3. Juger les groupes dans `suivi/doublons.toml` (Robin et Vygotski distincts), puis `zc doublons planifier --surs`. Le groupe Heylen doit être écarté (types différents).
+3. Juger les groupes (`zc doublons refuser` pour Robin et Vygotski, distincts, `zc doublons accepter` pour Heylen), accepter les groupes sûrs avec `zc doublons accepter --surs`, puis `zc doublons planifier`. Le groupe Heylen doit être écarté (types différents).
 4. `zc appliquer <plan> --tout` doit être refusé (pas d'essai), `--essai` doit appliquer un groupe, puis `--tout` doit être refusé faute de sauvegarde. Vérifier dans Zotero la fusion (PDF identique à la corbeille, PDF annoté et note rattachés, collections réunies).
 5. Fermer Zotero, `zc sauvegarder`, rouvrir, `zc appliquer <plan> --tout`.
 6. Modifier à la main dans Zotero le titre d'une fiche conservée, puis `zc annuler <plan>` et appliquer le plan d'annulation. Le titre retouché doit rester, le reste revenir, les fiches absorbées sortir de la corbeille.

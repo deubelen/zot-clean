@@ -489,7 +489,11 @@ def test_commande(monde, cfg, serveur, monkeypatch, capsys):
     (cfg.dossier_travail / 'config.toml').write_text(
         f'[zotero]\ndossier = "{cfg.dossier_zotero.as_posix()}"\n', encoding='utf-8')
     monkeypatch.setattr(ecriture, 'depuis_config', lambda cfg: serveur.client())
+    copies, copier = [], lecture.shutil.copy2
+    monkeypatch.setattr(lecture.shutil, 'copy2', lambda source, cible: (copies.append(source), copier(source, cible)))
     assert main(['noms', 'planifier', '--hors-ligne', '--dossier', str(cfg.dossier_travail)]) == 0
+    # Contrôle de la synchronisation et lecture de la bibliothèque sur une seule copie de la base.
+    assert copies == [cfg.base]
     sortie = capsys.readouterr().out
     assert '4 fichier(s) à renommer' in sortie and '--essai' in sortie
     rapport = next((cfg.dossier_travail / 'plans').glob('*_noms_*.md')).read_text(encoding='utf-8')

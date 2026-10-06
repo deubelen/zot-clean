@@ -1,7 +1,8 @@
 """Application d'un plan, socle commun de toutes les écritures (D34 à D36, D42, D46, D47, D56).
 
 Garde-fous vérifiés ici, et non par les commandes, pour qu'aucune étape ne
-puisse les contourner. Le plan doit viser le compte de la clé. Aucune clé
+puisse les contourner. La clé doit être celle du compte que Zotero synchronise
+sur cet ordinateur, et le plan doit viser ce compte. Aucune clé
 invalide ne doit bloquer la synchronisation. Au-delà de l'essai, un essai du
 même plan doit avoir réussi et une sauvegarde récente exister. L'essai porte
 toujours sur les premiers groupes du plan, si bien qu'un `--essai` relancé ne
@@ -85,6 +86,33 @@ def controler_synchronisation(cfg: Config) -> str | None:
     return None
 
 
+JAMAIS_SYNCHRONISEE = (
+    "Zotero n'a encore jamais synchronisé cette bibliothèque avec un compte zotero.org. Or zot-clean modifie la "
+    "bibliothèque en passant par zotero.org, puis Zotero reçoit les changements en synchronisant. Dans Zotero, "
+    "ouvrir Réglages › Synchronisation, se connecter à son compte zotero.org (le créer au besoin), lancer la "
+    "synchronisation (flèche verte en haut à droite) et attendre qu'elle se termine.")
+# Remède proposé quand la clé n'est pas celle du compte synchronisé, `{compte}` désignant ce dernier.
+REMEDE_COMPTE = ("Se connecter sur zotero.org avec le compte {compte}, y créer une clé "
+                 "(https://www.zotero.org/settings/keys/new, mêmes cases à cocher que la première fois), puis "
+                 "relancer `zc init` dans le dossier de travail pour remplacer l'ancienne.")
+
+
+def controler_compte(utilisateur: int, compte: lecture.Compte, remede: str = REMEDE_COMPTE) -> None:
+    """Refuse si la clé (compte `utilisateur`) n'est pas celle du compte que Zotero synchronise sur cet ordinateur.
+    Les plans sont construits sur la base locale et écrits par la clé : avec la clé d'un autre compte (personnel
+    et institutionnel, par exemple), ils viseraient une autre bibliothèque, et `lire_a_jour` y mêlerait ses
+    changements. Une base jamais synchronisée ne dit pas quel compte est le sien, et Zotero ne recevrait pas les
+    écritures faites par l'API. Contrôle local, sans requête, fait avant tout appel à zotero.org."""
+    if compte.id is None:
+        raise Refus(JAMAIS_SYNCHRONISEE + ' Relancer ensuite la commande.')
+    if compte.id != utilisateur:
+        nom = f'« {compte.nom} » (n° {compte.id})' if compte.nom else f'n° {compte.id}'
+        raise Refus(f"La clé API est celle du compte zotero.org n° {utilisateur}, alors que Zotero, sur cet "
+                    f"ordinateur, synchronise le compte {nom}. zot-clean lit la bibliothèque de cet ordinateur "
+                    "et écrit avec la clé, il modifierait donc une autre bibliothèque que celle-ci. "
+                    + remede.format(compte=nom))
+
+
 def copie_en_retard(locale: int, serveur: int) -> str:
     """Refus commun aux commandes qui lisent l'état réel sur la copie locale (D119, D123). Zotero, même ouvert, ne va
     pas toujours chercher seul les changements de collections faits par l'API, d'où la synchronisation manuelle."""
@@ -99,9 +127,11 @@ def lire_a_jour(cfg: Config, client: Client, signaler=lambda m: None, lire=None,
     """Bibliothèque à jour pour préparer un plan (D171). Lue sur la copie locale (D119) ; si Zotero n'a pas encore
     reçu les derniers changements du serveur (ceux de la passe précédente, en général), ils sont lus sur zotero.org
     et reportés, au lieu d'attendre la synchronisation. Le socle relit de toute façon chaque élément avant d'écrire.
-    `facultatif` : zotero.org injoignable, la copie locale seule suffit (commandes qui ne font que lire)."""
+    `facultatif` : zotero.org injoignable, la copie locale seule suffit (commandes qui ne font que lire). Toutes
+    les planifications passent par ici, d'où le contrôle du compte de la clé, avant toute requête à zotero.org."""
     from zot_clean.ecriture import ErreurAPI
     b = (lire or (lambda: lecture.lire(cfg.base)))()
+    controler_compte(client.utilisateur, b.compte)
     try:
         en_retard = client.version_serveur() > b.version
         ch = client.changements(b.version) if en_retard else None
@@ -147,6 +177,7 @@ def appliquer(plan: Plan, chemin_plan: Path, client: Client, cfg: Config, mode: 
     if plan.bibliotheque != client.utilisateur:
         raise Refus(f'Ce plan a été préparé pour le compte {plan.bibliotheque}, la clé est celle du compte '
                     f'{client.utilisateur}.')
+    controler_compte(client.utilisateur, lecture.compte_synchronise(cfg.base))
     bilan = Bilan()
     if avert := controler_synchronisation(cfg):
         bilan.avertissements.append(avert)

@@ -2,12 +2,14 @@
 
 Écrit `config.toml` (dossier Zotero, Better BibTeX détecté), `.env` (clé API
 vérifiée par l'API web, jamais affichée, revérifiée à chaque relance et
-redemandée si Zotero la refuse), `.gitignore`, `AGENTS.md` et les
+redemandée si Zotero la refuse ou si elle n'est pas celle du compte que Zotero
+synchronise sur cet ordinateur), `.gitignore`, `AGENTS.md` et les
 skills (`.agents/skills/` et `.claude/skills/`), et crée `rapports/`, `journal/`, `plans/` et
 `suivi/`. Les fichiers existants ne sont pas écrasés, sauf `AGENTS.md` et les
 skills avec `--maj`.
 """
 
+import http.client
 import json
 import os
 import urllib.error
@@ -16,8 +18,9 @@ from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
 
-from zot_clean import bbt
+from zot_clean import appliquer, bbt, lecture
 from zot_clean.config import FICHIER as CONFIG, lire_env
+from zot_clean.ecriture import Refus
 
 PAGE_CLES = 'https://www.zotero.org/settings/keys/new'
 API = 'https://api.zotero.org'
@@ -62,6 +65,7 @@ dossier = "{dossier}"
 # dossier = "~/Zotero-sauvegardes"
 # Âge maximal, en heures, d'une sauvegarde pour autoriser une application complète.
 # delai_heures = 24
+# Nombre de sauvegardes gardées, les plus récentes (au moins 1).
 # conserver = 2
 
 [confidentialite]
@@ -114,6 +118,14 @@ class CleRefusee(Exception):
     pass
 
 
+class ZoteroInjoignable(urllib.error.URLError):
+    """Réseau coupé, délai dépassé ou réponse illisible. Sous-classe d'`URLError`, que les appelants traitent déjà
+    comme « Zotero injoignable », avec un message en français."""
+
+    def __str__(self):
+        return f'Zotero injoignable ({self.reason}).'
+
+
 def verifier_cle(cle: str) -> InfoCle:
     """Interroge l'API web sur la clé elle-même (identifiant du compte et droits)."""
     req = urllib.request.Request(f'{API}/keys/current', headers={'Zotero-API-Key': cle, 'Zotero-API-Version': '3',
@@ -124,6 +136,12 @@ def verifier_cle(cle: str) -> InfoCle:
     except urllib.error.HTTPError as e:
         raise CleRefusee('Clé refusée par Zotero (invalide ou révoquée).' if e.code in (403, 404)
                          else f'Réponse inattendue de Zotero ({e.code}).') from None
+    except TimeoutError:  # pendant la lecture de la réponse, hors d'`URLError`
+        raise ZoteroInjoignable('délai de 20 secondes dépassé') from None
+    except urllib.error.URLError as e:
+        raise ZoteroInjoignable(e.reason) from None
+    except (OSError, http.client.HTTPException, ValueError) as e:  # connexion coupée, réponse tronquée ou illisible
+        raise ZoteroInjoignable(f'réponse interrompue ou illisible, {type(e).__name__}') from None
     droits = d.get('access', {}).get('user', {})
     return InfoCle(int(d['userID']), d.get('username', ''), bool(droits.get('library')), bool(droits.get('write')),
                    bool(droits.get('notes')))
@@ -134,22 +152,40 @@ def droits_manquants(info: InfoCle) -> list[str]:
                             ("droit d'écriture", info.ecriture)) if not ok]
 
 
-def cle_enregistree_valide(dossier: Path, afficher) -> bool:
-    """Revérifie la clé de `.env`. Une clé refusée ou privée d'un droit est à remplacer, une clé que Zotero,
-    injoignable, n'a pas pu vérifier est gardée."""
-    cle = lire_env(dossier).get('ZOTERO_API_KEY')
-    if not cle:
+def du_compte(utilisateur: int, compte: lecture.Compte | None, afficher, remede: str) -> bool:
+    """La clé du compte `utilisateur` est-elle celle du compte que la base synchronise ? Sinon, le refus du socle
+    (`appliquer.controler_compte`) est affiché, avec `remede`. `compte` None : pas de base à comparer."""
+    try:
+        if compte is not None:
+            appliquer.controler_compte(utilisateur, compte, remede)
+        return True
+    except Refus as e:
+        afficher(str(e))
         return False
+
+
+def cle_enregistree_valide(dossier: Path, afficher, compte: lecture.Compte | None = None) -> bool:
+    """Revérifie la clé de `.env`. Une clé refusée, privée d'un droit ou d'un autre compte que celui que Zotero
+    synchronise (`compte`) est à remplacer. Une clé que Zotero, injoignable, n'a pas pu vérifier est gardée, si le
+    compte noté avec elle est le bon."""
+    env = lire_env(dossier)
+    if not (cle := env.get('ZOTERO_API_KEY')):
+        return False
+    remede = 'Elle est à remplacer par une clé créée en étant connecté sur zotero.org au compte {compte}.'
     try:
         info = verifier_cle(cle)
     except CleRefusee as e:
         afficher(f'{e} La clé enregistrée dans .env est à remplacer.')
         return False
     except urllib.error.URLError:
+        if (n := env.get('ZOTERO_USER_ID', '')).isdigit() and not du_compte(int(n), compte, afficher, remede):
+            return False
         afficher('Clé API déjà enregistrée dans .env, non vérifiée (Zotero injoignable).')
         return True
     if manques := droits_manquants(info):
         afficher(f"La clé enregistrée dans .env n'a plus {', '.join(manques)}. Elle est à remplacer.")
+        return False
+    if not du_compte(info.utilisateur, compte, afficher, remede):
         return False
     afficher(f'Clé API déjà enregistrée dans .env, vérifiée pour le compte {info.nom} ({info.utilisateur}).')
     return True
@@ -275,8 +311,19 @@ def initialiser(dossier: Path, dossier_zotero: Path | None, maj: bool, demander,
     etat_bbt = bbt.detecter(dossier_zotero)
     afficher(bbt.decrire(etat_bbt) + ('' if etat_bbt.present else ' Le contrôle des clés de citation sera désactivé.'))
 
-    if not cle_enregistree_valide(dossier, afficher):
-        afficher(f"\nzot-clean écrit dans Zotero par l'API web, avec une clé personnelle. Pour la créer, ouvrir\n"
+    # La clé doit être celle du compte que Zotero synchronise ici : les plans sont construits sur cette base.
+    try:
+        compte = lecture.compte_synchronise(dossier_zotero / 'zotero.sqlite')
+    except lecture.SchemaInconnu as e:
+        afficher(str(e))
+        return 1
+    nom = f'« {compte.nom} » (n° {compte.id})' if compte.nom else f'n° {compte.id}'
+    if compte.id is None:
+        afficher(f"\n{appliquer.JAMAIS_SYNCHRONISEE} Relancer ensuite `zc init` pour enregistrer la clé API. "
+                 "L'audit fonctionne sans clé en attendant, aucune commande de nettoyage ne fonctionne sans elle.")
+    elif not cle_enregistree_valide(dossier, afficher, compte):
+        afficher(f"\nzot-clean écrit dans Zotero par l'API web, avec une clé personnelle. Pour la créer, se connecter\n"
+                 f"sur zotero.org avec le compte que Zotero synchronise sur cet ordinateur, {nom}, ouvrir\n"
                  f"  {PAGE_CLES}\ncocher « Allow library access », « Allow notes access » et « Allow write access »,\n"
                  "enregistrer, puis coller la clé ici (elle ne s'affiche pas pendant la saisie).")
         while True:
@@ -291,6 +338,9 @@ def initialiser(dossier: Path, dossier_zotero: Path | None, maj: bool, demander,
                 continue
             if manques := droits_manquants(info):
                 afficher(f"Clé valide mais sans {', '.join(manques)}. Modifier la clé sur zotero.org, puis la recoller.")
+                continue
+            if not du_compte(info.utilisateur, compte, afficher, 'Coller une clé créée en étant connecté sur '
+                             'zotero.org au compte {compte}, ou Entrée pour passer cette étape.'):
                 continue
             ecrire_env(dossier, ZOTERO_API_KEY=cle, ZOTERO_USER_ID=str(info.utilisateur))
             afficher(f'Clé vérifiée pour le compte {info.nom} ({info.utilisateur}), enregistrée dans .env.')

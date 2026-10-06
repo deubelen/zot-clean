@@ -5,6 +5,8 @@ jamais les fichiers joints) est faite dans un dossier temporaire, effacé après
 lecture. Avant toute requête, on vérifie que les tables et colonnes utilisées
 existent, pour s'arrêter proprement si une version de Zotero a changé le schéma.
 Si Zotero écrit dans la base pendant la copie, celle-ci est refaite (D185).
+Dans le bloc `partager()`, que la ligne de commande ouvre pour chaque commande,
+les lectures se partagent une seule copie tant que Zotero n'écrit pas dans la base.
 Les éléments et collections de la corbeille sont ignorés, avec ce que Zotero y
 cache avec eux, à savoir les pièces jointes et notes d'une fiche, les
 annotations d'une pièce jointe et les sous-collections d'une collection (D186).
@@ -16,6 +18,7 @@ import shutil
 import sqlite3
 import tempfile
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -25,7 +28,7 @@ PAUSE = 1.0
 
 # Tables et colonnes lues ici. Toute absence arrête la lecture.
 SCHEMA = {
-    'items': {'itemID', 'itemTypeID', 'libraryID', 'key', 'synced', 'dateAdded'},
+    'items': {'itemID', 'itemTypeID', 'libraryID', 'key', 'synced', 'dateAdded', 'version'},
     'itemTypes': {'itemTypeID', 'typeName'},
     'fields': {'fieldID', 'fieldName'},
     'itemData': {'itemID', 'fieldID', 'valueID'},
@@ -37,7 +40,7 @@ SCHEMA = {
     'tags': {'tagID', 'name'},
     'itemTags': {'itemID', 'tagID', 'type'},
     'itemAttachments': {'itemID', 'parentItemID', 'linkMode', 'contentType', 'path'},
-    'itemNotes': {'itemID', 'parentItemID'},
+    'itemNotes': {'itemID', 'parentItemID', 'note'},
     'deletedItems': {'itemID'},
     'deletedCollections': {'collectionID'},
     'version': {'schema', 'version'},
@@ -51,6 +54,7 @@ SCHEMA = {
     'savedSearches': {'savedSearchID', 'savedSearchName', 'libraryID', 'key'},
     'savedSearchConditions': {'savedSearchID', 'condition', 'operator', 'value'},
     'deletedSearches': {'savedSearchID'},
+    'settings': {'setting', 'key', 'value'},
 }
 
 TYPES_NON_FICHES = {'note', 'attachment', 'annotation'}
@@ -61,6 +65,15 @@ DATES_HORS_BASE = {'date', 'filingDate'}  # champs de date rangés en base sous 
 
 class SchemaInconnu(Exception):
     pass
+
+
+@dataclass
+class Compte:
+    """Compte zotero.org que synchronise la base locale. Zotero le retient à la première synchronisation
+    (`Zotero.Users.setCurrentUserID`, table `settings`, `setting = 'account'`), le garde même si l'on délie le
+    compte, et refuse ensuite d'en synchroniser un autre sans vider la base. `id` None : jamais synchronisée."""
+    id: int | None = None
+    nom: str = ''
 
 
 @dataclass
@@ -81,6 +94,8 @@ class PieceJointe:
     type_contenu: str
     chemin: str
     fichier: Path | None  # emplacement sur le disque, None si on ne sait pas le résoudre
+    version: int = 0  # version de l'élément reçue du serveur, 0 s'il n'a jamais été synchronisé
+    note: bool = False  # la pièce jointe porte une note à elle, rangée par Zotero dans `itemNotes` (D206)
 
 
 @dataclass
@@ -138,6 +153,7 @@ class Bibliotheque:
     tags_corbeille: dict[str, int] = field(default_factory=dict)  # tag -> éléments de la corbeille qui le portent
     # Champs que connaît cette version de Zotero (`citationKey` n'existe que depuis Zotero 7, D145).
     champs_connus: set[str] = field(default_factory=set)
+    compte: Compte = field(default_factory=Compte)  # compte zotero.org synchronisé, celui que la clé doit viser
 
     def par_cle(self) -> dict[str, Element]:
         return {e.cle: e for e in self.elements.values()}
@@ -201,6 +217,11 @@ def copier(base: Path, destination: Path) -> Path:
     """Copie la base et son journal `-wal`. Zotero ouvert peut écrire entre les deux copies, ou ranger le journal
     dans la base, et la copie perdrait alors les derniers changements sans erreur. Si l'un des deux fichiers a
     changé pendant la copie, elle est refaite (D185)."""
+    return _copier(base, destination)[0]
+
+
+def _copier(base: Path, destination: Path) -> tuple[Path, tuple]:
+    """Comme `copier`, avec l'état des fichiers copiés (taille et date de la base et du journal)."""
     if not base.is_file():
         raise FileNotFoundError(f'Base Zotero introuvable : {base}')
     copie = destination / base.name
@@ -214,28 +235,73 @@ def copier(base: Path, destination: Path) -> Path:
         if wal.is_file():
             shutil.copy2(wal, copie_wal)
         if _etat(base, wal) == avant:
-            return copie
+            return copie, avant
     raise SystemExit('Zotero écrit dans sa base pendant la lecture (synchronisation en cours ?). Attendre la fin '
                      'de la synchronisation, puis relancer la commande.')
 
 
+# Copies partagées pendant un bloc `partager()` : dossier temporaire, et pour chaque base, sa copie et l'état des
+# fichiers copiés. None hors d'un tel bloc.
+_partage: dict | None = None
+
+
+@contextmanager
+def partager():
+    """Les lectures faites dans ce bloc (`lire`, `lire_types`, `etat_synchronisation`, `compte_synchronise`) se
+    partagent une seule copie de la base, au lieu d'en faire une chacune. Une base de 1 à 2 Go était copiée trois
+    ou quatre fois par commande. La copie est refaite dès que la base ou son journal ont changé depuis, comme si
+    chaque lecture copiait la base, et effacée à la fin du bloc."""
+    global _partage
+    if _partage is not None:  # bloc déjà ouvert plus haut
+        yield
+        return
+    with tempfile.TemporaryDirectory(prefix='zot-clean-') as tmp:
+        _partage = {'dossier': Path(tmp), 'copies': {}}
+        try:
+            yield
+        finally:
+            _partage = None
+
+
+@contextmanager
+def _ouvrir(base: Path):
+    """Connexion à une copie de `base`, partagée dans un bloc `partager()`, propre à cette lecture sinon."""
+    if _partage is None:
+        with tempfile.TemporaryDirectory(prefix='zot-clean-') as tmp:
+            db = sqlite3.connect(copier(base, Path(tmp)))
+            try:
+                yield db
+            finally:
+                db.close()
+        return
+    copies = _partage['copies']
+    cle = base.resolve()
+    if cle not in copies:
+        (dossier := _partage['dossier'] / str(len(copies))).mkdir()
+        copies[cle] = _copier(base, dossier)
+    elif copies[cle][1] != _etat(base, base.with_name(base.name + '-wal')):  # Zotero a écrit depuis la copie
+        copies[cle] = _copier(base, copies[cle][0].parent)
+    db = sqlite3.connect(copies[cle][0])
+    try:
+        yield db
+    finally:
+        db.close()
+
+
 def lire(base: Path, bibliotheque: int = BIBLIOTHEQUE_PERSO) -> Bibliotheque:
     """Lit une bibliothèque (la personnelle par défaut) depuis une copie temporaire de `base`."""
-    with tempfile.TemporaryDirectory(prefix='zot-clean-') as tmp:
-        db = sqlite3.connect(copier(base, Path(tmp)))
-        try:
-            return _lire(db, bibliotheque, base.parent / 'storage')
-        finally:
-            db.close()
+    with _ouvrir(base) as db:
+        return _lire(db, bibliotheque, base.parent / 'storage')
 
 
 def _lire(db: sqlite3.Connection, lib: int, stockage: Path) -> Bibliotheque:
     version = verifier_schema(db)
-    elements = {}
-    for iid, cle, typ, ajout, synced in db.execute(
-            'select i.itemID, i.key, t.typeName, i.dateAdded, i.synced from items i join itemTypes t using(itemTypeID) '
-            'where i.libraryID = ? and i.itemID not in (select itemID from deletedItems)', (lib,)):
+    elements, versions = {}, {}
+    for iid, cle, typ, ajout, synced, v in db.execute(
+            'select i.itemID, i.key, t.typeName, i.dateAdded, i.synced, i.version from items i join itemTypes t '
+            'using(itemTypeID) where i.libraryID = ? and i.itemID not in (select itemID from deletedItems)', (lib,)):
         elements[iid] = Element(iid, cle, typ, ajout, bool(synced))
+        versions[iid] = int(v or 0)
     for iid, nom, val in db.execute(
             'select d.itemID, f.fieldName, v.value from itemData d join fields f using(fieldID) '
             'join itemDataValues v using(valueID)'):
@@ -262,9 +328,15 @@ def _lire(db: sqlite3.Connection, lib: int, stockage: Path) -> Bibliotheque:
             'select itemID, parentItemID, linkMode, contentType, path from itemAttachments'):
         if iid in elements:
             pieces[iid] = PieceJointe(iid, elements[iid].cle, parent, mode, typ or '', chemin or '',
-                                      _fichier(elements[iid].cle, mode, chemin or '', stockage))
-    notes = {iid: parent for iid, parent in db.execute('select itemID, parentItemID from itemNotes')
-             if iid in elements}
+                                      _fichier(elements[iid].cle, mode, chemin or '', stockage), versions[iid])
+    # Zotero range aussi dans `itemNotes`, sans parent, la note propre d'une pièce jointe (D206). Seules les vraies
+    # notes vont dans `notes`, et une pièce jointe notée le retient.
+    notes = {}
+    for iid, parent, texte in db.execute('select itemID, parentItemID, note from itemNotes'):
+        if iid in pieces:
+            pieces[iid].note = note_non_vide(texte)
+        elif iid in elements and elements[iid].type == 'note':
+            notes[iid] = parent
     invalides = [k for (k,) in db.execute('select key from items where libraryID = ?', (lib,))
                  if not CLE_VALIDE.match(k)]
     annotations: dict[int, int] = {}
@@ -304,8 +376,14 @@ def _lire(db: sqlite3.Connection, lib: int, stockage: Path) -> Bibliotheque:
     b.recherches = dict(db.execute('select key, savedSearchName from savedSearches where libraryID = ? and '
                                    'savedSearchID not in (select savedSearchID from deletedSearches)', (lib,)))
     b.champs_connus = {nom for (nom,) in db.execute('select fieldName from fields')}
+    b.compte = _compte(db)
     cacher_avec_la_corbeille(b)
     return b
+
+
+def note_non_vide(texte) -> bool:
+    """Une note sans texte reste enveloppée par Zotero dans `<div class="zotero-note znv1"></div>`."""
+    return bool(re.sub(r'<[^>]*>|&nbsp;|\s', '', texte or ''))
 
 
 def cacher_avec_la_corbeille(b: Bibliotheque) -> None:
@@ -437,7 +515,8 @@ def reporter(b: Bibliotheque, ch, stockage: Path) -> None:
             else:
                 chemin = d.get('path') or ''
             b.pieces[iid] = PieceJointe(iid, d['key'], parent, mode, d.get('contentType') or '', chemin,
-                                        _fichier(d['key'], mode, chemin, stockage))
+                                        _fichier(d['key'], mode, chemin, stockage), int(d.get('version') or 0),
+                                        note_non_vide(d.get('note')))
         elif d['itemType'] == 'note':
             b.notes[iid] = parent
         elif d['itemType'] == 'annotation' and parent is not None and b.annotation_de.get(iid) != parent:
@@ -492,46 +571,54 @@ class Types:
 
 
 def lire_types(base: Path) -> Types:
-    with tempfile.TemporaryDirectory(prefix='zot-clean-') as tmp:
-        db = sqlite3.connect(copier(base, Path(tmp)))
-        try:
-            verifier_schema(db)
-            champs: dict[str, set[str]] = {}
-            for typ, champ in db.execute('select t.typeName, f.fieldName from itemTypeFields i '
-                                         'join itemTypes t using(itemTypeID) join fields f using(fieldID)'):
-                champs.setdefault(typ, set()).add(champ)
-            bases: dict[str, dict[str, str]] = {}
-            for typ, b, propre in db.execute(
-                    'select t.typeName, fb.fieldName, fp.fieldName from baseFieldMappings m join itemTypes t '
-                    'using(itemTypeID) join fields fb on fb.fieldID = m.baseFieldID '
-                    'join fields fp on fp.fieldID = m.fieldID'):
-                bases.setdefault(typ, {})[propre] = b
-            roles: dict[str, set[str]] = {}
-            for typ, role in db.execute('select t.typeName, c.creatorType from itemTypeCreatorTypes i '
-                                        'join itemTypes t using(itemTypeID) join creatorTypes c using(creatorTypeID)'):
-                roles.setdefault(typ, set()).add(role)
-            return Types(champs, bases, roles)
-        finally:
-            db.close()
+    with _ouvrir(base) as db:
+        verifier_schema(db)
+        champs: dict[str, set[str]] = {}
+        for typ, champ in db.execute('select t.typeName, f.fieldName from itemTypeFields i '
+                                     'join itemTypes t using(itemTypeID) join fields f using(fieldID)'):
+            champs.setdefault(typ, set()).add(champ)
+        bases: dict[str, dict[str, str]] = {}
+        for typ, b, propre in db.execute(
+                'select t.typeName, fb.fieldName, fp.fieldName from baseFieldMappings m join itemTypes t '
+                'using(itemTypeID) join fields fb on fb.fieldID = m.baseFieldID '
+                'join fields fp on fp.fieldID = m.fieldID'):
+            bases.setdefault(typ, {})[propre] = b
+        roles: dict[str, set[str]] = {}
+        for typ, role in db.execute('select t.typeName, c.creatorType from itemTypeCreatorTypes i '
+                                    'join itemTypes t using(itemTypeID) join creatorTypes c using(creatorTypeID)'):
+            roles.setdefault(typ, set()).add(role)
+        return Types(champs, bases, roles)
 
 
 def etat_synchronisation(base: Path, bibliotheque: int = BIBLIOTHEQUE_PERSO) -> tuple[list[str], int, int]:
     """Clés invalides (corbeille comprise), nombre d'éléments et collections pas encore synchronisés hors
     annotations, et nombre d'annotations pas encore synchronisées (souvent bloquées, sans effet sur les fiches)."""
-    with tempfile.TemporaryDirectory(prefix='zot-clean-') as tmp:
-        db = sqlite3.connect(copier(base, Path(tmp)))
-        try:
-            verifier_schema(db)
-            invalides = [k for (k,) in db.execute('select key from items where libraryID = ?', (bibliotheque,))
-                         if not CLE_VALIDE.match(k)]
-            annotations = db.execute(
-                "select count(*) from items i join itemTypes t using(itemTypeID) where i.libraryID = ? "
-                "and i.synced = 0 and t.typeName = 'annotation'", (bibliotheque,)).fetchone()[0]
-            non_sync = sum(db.execute(f'select count(*) from {t} where libraryID = ? and synced = 0',
-                                      (bibliotheque,)).fetchone()[0] for t in ('items', 'collections'))
-            return invalides, non_sync - annotations, annotations
-        finally:
-            db.close()
+    with _ouvrir(base) as db:
+        verifier_schema(db)
+        invalides = [k for (k,) in db.execute('select key from items where libraryID = ?', (bibliotheque,))
+                     if not CLE_VALIDE.match(k)]
+        annotations = db.execute(
+            "select count(*) from items i join itemTypes t using(itemTypeID) where i.libraryID = ? "
+            "and i.synced = 0 and t.typeName = 'annotation'", (bibliotheque,)).fetchone()[0]
+        non_sync = sum(db.execute(f'select count(*) from {t} where libraryID = ? and synced = 0',
+                                  (bibliotheque,)).fetchone()[0] for t in ('items', 'collections'))
+        return invalides, non_sync - annotations, annotations
+
+
+def compte_synchronise(base: Path) -> Compte:
+    """Compte zotero.org que synchronise la base, pour une commande qui ne lit pas toute la bibliothèque."""
+    with _ouvrir(base) as db:
+        verifier_schema(db)
+        return _compte(db)
+
+
+def _compte(db: sqlite3.Connection) -> Compte:
+    reglages = dict(db.execute("select key, value from settings where setting = 'account'"))
+    try:
+        ident = int(reglages.get('userID') or 0)
+    except (TypeError, ValueError):
+        ident = 0
+    return Compte(ident or None, str(reglages.get('username') or ''))
 
 
 def version_bibliotheque(base: Path, bibliotheque: int = BIBLIOTHEQUE_PERSO) -> int:

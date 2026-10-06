@@ -59,6 +59,16 @@ def test_cache_et_absence(cfg, faux):
     assert len(faux.requetes) == 1
 
 
+def test_rafraichir_garde_le_plafond_d_openalex(cfg, faux):
+    budget = cfg.cache / sources.BUDGET_OPENALEX
+    cfg.cache.mkdir(parents=True)
+    budget.write_text('{"jour": "2026-10-06", "recherches": 899}', encoding='utf-8')
+    (cfg.cache / 'crossref.json').write_text('{}', encoding='utf-8')
+    services(cfg, faux, rafraichir=True)
+    assert not (cfg.cache / 'crossref.json').exists()
+    assert budget.read_text(encoding='utf-8') == '{"jour": "2026-10-06", "recherches": 899}'
+
+
 def test_resolveur(cfg, faux):
     faux.handles.add('10.1/datacite')
     s = services(cfg, faux)

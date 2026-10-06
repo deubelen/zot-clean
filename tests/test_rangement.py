@@ -534,3 +534,25 @@ def test_commande_laisser(monde, cfg, serveur, monkeypatch, capsys):
     assert (cfg.suivi / r.LAISSEES).is_file()
     assert main(['fonds', 'a-ranger', '--laisser', fiches['peur'], *dossier]) == 1
     assert 'déjà sa place' in capsys.readouterr().err
+
+
+def test_fiche_rangee_apres_la_creation_de_toutes_ses_collections(monde, cfg, serveur):
+    """Une fiche qui entre dans deux collections créées par le plan va dans le groupe de la dernière créée. Dans celui
+    de la première, l'essai (ou un paquet précédent) l'écrirait avant que la seconde existe, et le groupe échouerait."""
+    bi, k, fiches, b = monde
+    (cfg.dossier_travail / f.PLAN).write_text(PLAN.replace('# Concepts', '## Sociologie\n\nSociétés.\n\n# Concepts'),
+                                               encoding='utf-8')
+    f.enregistrer(cfg, f.controler(cfg))
+    r.ecrire(cfg, r.charger(cfg) + [
+        r.Entree(fiches['peur'], r.AJOUTER, 'Psychologie/Perception/Apprentissage perceptif', decision=r.ACCEPTER),
+        r.Entree(fiches['peur'], r.AJOUTER, 'Sociologie', decision=r.ACCEPTER)], b, set())
+    plan, _ = r.planifier(b, cfg, serveur.client())
+    titres = [g.titre for g in plan.groupes]
+    premier = titres.index('40 Fonds/Psychologie/Perception/Apprentissage perceptif')
+    socio = titres.index('40 Fonds/Sociologie')
+    assert premier < socio
+    assert fiches['peur'] in {op.cle for op in plan.groupes[socio].operations}
+    # L'essai s'arrête avant la création de Sociologie : aucune de ses écritures ne vise une collection absente.
+    cfg.ecriture.essai = premier + 1
+    bilan = appliquer(plan, ecrire(plan, cfg), serveur.client(), cfg, ESSAI)
+    assert not bilan.erreurs and not bilan.conflits

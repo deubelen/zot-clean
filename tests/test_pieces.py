@@ -184,3 +184,15 @@ def test_annotation_ajoutee_apres_le_plan(monde, cfg, serveur):
     bilan = appliquer(plan, ecrire(plan, cfg), serveur.client(), cfg, ESSAI)
     assert annotation in bilan.conflits['1'] and 'hors de la corbeille' in bilan.conflits['1']
     assert not serveur.elements[c['v2']].get('deleted')
+
+
+def test_copie_avec_note_propre_jamais_a_la_corbeille(zotero, serveur, cfg):
+    # D206 : la note propre d'une pièce jointe protège la copie comme une annotation (D125).
+    dd = Double(zotero, serveur)
+    f = dd.fiche('Mind in society')
+    v1 = dd.pdf(f, 'v.pdf', b'%PDF vygotsky')
+    v2 = dd.pdf(f, 'v copie.pdf', b'%PDF vygotsky', note='<p>Mes remarques</p>')
+    b = dd.bibliotheque()
+    decider(cfg, b, {(v1, v2): (p.APPLIQUER, [v2], {})})
+    plan, rapport = p.planifier(cfg, serveur.client(), b)
+    assert not plan.groupes and 'porte des annotations ou des notes' in rapport

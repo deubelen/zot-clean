@@ -65,7 +65,7 @@ puis fermez le terminal, rouvrez-en un et réessayez `zc --help`.
 
 `zot-clean` a besoin d'une clé pour écrire dans votre bibliothèque. C'est une sorte de mot de passe propre à cet usage, que vous pouvez révoquer à tout moment sans toucher à votre mot de passe Zotero.
 
-1. Ouvrir [zotero.org/settings/keys/new](https://www.zotero.org/settings/keys/new) et se connecter.
+1. Ouvrir [zotero.org/settings/keys/new](https://www.zotero.org/settings/keys/new) et se connecter avec le compte que Zotero synchronise sur cet ordinateur (son nom figure dans Zotero › Réglages › Synchronisation). Si vous avez deux comptes, par exemple un personnel et un institutionnel, une clé créée sur l'autre sera refusée, puisque `zot-clean` modifierait alors une autre bibliothèque que celle de votre ordinateur.
 2. Donner un nom à la clé, par exemple « zot-clean ».
 3. Cocher **Allow library access**, **Allow notes access** et **Allow write access**.
 4. Enregistrer (*Save Key*). Zotero affiche la clé, une suite d'une vingtaine de lettres et de chiffres. Laissez la page ouverte, vous allez la copier à l'étape suivante.
@@ -83,7 +83,7 @@ zc init ~/Zotero-travail
 La commande
 
 1. cherche votre base Zotero (dans `~/Zotero` par défaut, sinon elle vous demande où elle se trouve, ce qu'indique Zotero › Réglages › Avancé › Fichiers et dossiers) ;
-2. vous demande la clé API, qui ne s'affiche pas pendant que vous la collez (c'est normal), et vérifie ses droits ;
+2. vous demande la clé API, qui ne s'affiche pas pendant que vous la collez (c'est normal), et vérifie ses droits et son compte, qui doit être celui que Zotero synchronise. Si Zotero n'a encore jamais synchronisé votre bibliothèque, elle ne demande pas de clé et vous dit d'abord de régler la synchronisation ;
 3. propose une clé OpenAlex, facultative, qui aide à trouver les DOI manquants (Entrée pour passer) ;
 4. demande une adresse électronique de contact pour les services de métadonnées (facultative, Entrée pour passer) ;
 5. écrit la configuration (`config.toml`), les consignes de l'agent (`AGENTS.md`) et les dossiers de travail.
@@ -147,8 +147,8 @@ L'ordre conseillé est le suivant. Chaque étape peut s'interrompre et reprendre
 
 | Étape | Ce qu'elle fait | Ce que vous faites |
 |---|---|---|
-| 2. Doublons | Repère les fiches en double et les fusionne comme le fait Zotero (notes, pièces jointes et collections réunies). Traite aussi les PDF présents en plusieurs copies. | Vous confirmez les groupes sûrs en bloc et tranchez les cas douteux (deux éditions d'un même livre, une traduction et son original…). |
-| 3. Métadonnées | Corrige les DOI, change le type des fiches mal typées, complète les champs vides par Crossref, OpenAlex, la BnF, le Sudoc et Open Library. Une valeur déjà présente n'est jamais remplacée. | Vous jugez les cas incertains, par exemple un DOI qui semble désigner une autre publication. |
+| 2. Doublons | Repère les fiches en double et les fusionne comme le fait Zotero (notes, pièces jointes, collections et liens « Connexe » réunis). Si la fiche gardée porte une clé de citation suffixée (« dupont2002a ») et une fiche fusionnée la clé de base (« dupont2002 »), la fiche gardée prend celle-ci. Traite aussi les PDF présents en plusieurs copies. | Vous confirmez les groupes sûrs en bloc et tranchez les cas douteux (deux éditions d'un même livre, une traduction et son original…). |
+| 3. Métadonnées | Corrige les DOI, change le type des fiches mal typées, complète les champs vides par Crossref, OpenAlex, la BnF, le Sudoc et Open Library. Le complément ne remplace jamais une valeur déjà présente. Les corrections, elles, changent des valeurs, chacune annoncée dans le rapport du plan. Un DOI qui n'existe nulle part est remplacé par le bon quand il est trouvé avec certitude. Un changement de type vide les champs que le nouveau type n'admet pas, après avoir recopié leur valeur dans le champ Extra. | Vous jugez les cas incertains, par exemple un DOI qui semble désigner une autre publication. |
 | 4. Plan du fonds | Propose, à partir de vos collections et de vos tags, un plan de classement par disciplines et thèmes, écrit dans `plan.md`. Rien n'est modifié dans Zotero. | Vous discutez le plan avec l'agent jusqu'à le valider, puis décidez du sort de chaque ancienne collection. |
 | 5. Rangement | Transforme vos collections d'après le plan validé, en gardant celles qui deviennent des thèmes, puis répartit les fiches, en plusieurs passes. | Vous approuvez les répartitions proposées par paquets. |
 | 6. Tags | Range vos tags d'après la méthode (états, concepts, marques), retire les mots-clés d'éditeurs ajoutés automatiquement, réunit les variantes d'un même tag et donne leur couleur aux tags de la méthode, chacun sur une touche du clavier. |
@@ -236,6 +236,8 @@ La seconde commande remplace les consignes de l'agent et les guides des étapes 
 | Aucun essai de ce plan n'a réussi | Lancer d'abord `zc appliquer <plan> --essai` et vérifier le résultat dans Zotero. |
 | Éléments pas encore synchronisés | Laisser Zotero ouvert et lancer sa synchronisation (flèche verte), puis relancer la commande. Quand c'est seulement Zotero qui n'a pas encore reçu les derniers changements du serveur, `zc` n'attend pas, il les lit sur zotero.org. Synchroniser quand même avant de vérifier quoi que ce soit dans Zotero. |
 | Clé refusée par Zotero | Créer une nouvelle clé sur zotero.org (étape 4), puis relancer `zc init ~/Zotero-travail`. Il revérifie la clé enregistrée et, si Zotero la refuse, demande la nouvelle sans rien changer d'autre. |
+| La clé API est celle du compte zotero.org n° …, alors que Zotero, sur cet ordinateur, synchronise le compte … | La clé a été créée sur un autre compte que celui de cet ordinateur (personnel au lieu d'institutionnel, par exemple). Se connecter sur zotero.org avec le compte nommé dans le message, y créer une clé (étape 4), puis relancer `zc init ~/Zotero-travail`, qui remplace l'ancienne. En attendant, `zc audit --hors-ligne` fait l'audit sans se servir de la clé. |
+| Zotero n'a encore jamais synchronisé cette bibliothèque | Dans Zotero, ouvrir Réglages › Synchronisation, se connecter à son compte zotero.org (le créer au besoin), synchroniser avec la flèche verte et attendre la fin, puis relancer `zc init ~/Zotero-travail` pour enregistrer la clé. |
 | Élément(s) à clé invalide | Ne rien forcer. Ouvrir une [issue](https://github.com/deubelen/zot-clean/issues). |
 
 Pour tout autre problème, ou une question, ouvrez une [issue](https://github.com/deubelen/zot-clean/issues) en joignant le message affiché, sans votre clé API ni les titres de vos références si elles sont confidentielles.

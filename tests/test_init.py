@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from zot_clean import bbt, config, init
+from zot_clean import bbt, config, init, lecture
 
 
 @pytest.fixture
@@ -13,7 +13,7 @@ def cle_valide(monkeypatch):
         appels.append(cle)
         if cle != 'BONNE':
             raise init.CleRefusee('Clé refusée par Zotero (invalide ou révoquée).')
-        return init.InfoCle(12345, 'durand', True, True, True)
+        return init.InfoCle(4242, 'durand', True, True, True)  # compte que synchronise la base de test
 
     monkeypatch.setattr(init, 'verifier_cle', verifier)
     return appels
@@ -34,7 +34,7 @@ def test_cree_le_dossier_de_travail(tmp_path, zotero, cle_valide):
     code, sortie = lancer(travail, zotero, secrets=['MAUVAISE', 'BONNE'])
     assert code == 0 and cle_valide == ['MAUVAISE', 'BONNE']
     assert 'Réessayer' in sortie and 'BONNE' not in sortie
-    assert init.lire_env(travail) == {'ZOTERO_API_KEY': 'BONNE', 'ZOTERO_USER_ID': '12345'}
+    assert init.lire_env(travail) == {'ZOTERO_API_KEY': 'BONNE', 'ZOTERO_USER_ID': '4242'}
     assert {p.name for p in travail.iterdir()} == {'config.toml', '.env', '.gitignore', 'AGENTS.md', 'guide.md', 'methode.md', '.agents', '.claude', 'rapports', 'journal', 'plans', 'suivi'}
     for racine in ('.agents', '.claude'):
         for skill in ('doublons', 'metadonnees', 'fonds', 'tags', 'cles'):
@@ -152,7 +152,7 @@ def test_cle_openalex_facultative(tmp_path, zotero, cle_valide):
     zotero.enregistrer()
     code, sortie = lancer(tmp_path, zotero, secrets=['BONNE', 'CLE-OA'])
     assert code == 0 and 'CLE-OA' not in sortie
-    assert init.lire_env(tmp_path) == {'ZOTERO_API_KEY': 'BONNE', 'ZOTERO_USER_ID': '12345',
+    assert init.lire_env(tmp_path) == {'ZOTERO_API_KEY': 'BONNE', 'ZOTERO_USER_ID': '4242',
                                        'OPENALEX_API_KEY': 'CLE-OA'}
 
 
@@ -170,13 +170,13 @@ def test_cle_enregistree_revoquee_redemandee(tmp_path, zotero, cle_valide):
     init.ecrire_env(tmp_path, ZOTERO_API_KEY='REVOQUEE', ZOTERO_USER_ID='1', OPENALEX_API_KEY='OA')
     _, sortie = lancer(tmp_path, zotero, secrets=['BONNE'])
     assert 'à remplacer' in sortie and cle_valide == ['REVOQUEE', 'BONNE']
-    assert init.lire_env(tmp_path) == {'ZOTERO_API_KEY': 'BONNE', 'ZOTERO_USER_ID': '12345', 'OPENALEX_API_KEY': 'OA'}
+    assert init.lire_env(tmp_path) == {'ZOTERO_API_KEY': 'BONNE', 'ZOTERO_USER_ID': '4242', 'OPENALEX_API_KEY': 'OA'}
 
 
 def test_cle_enregistree_sans_droit_d_ecriture_redemandee(tmp_path, zotero, monkeypatch):
     zotero.enregistrer()
     init.ecrire_env(tmp_path, ZOTERO_API_KEY='LECTURE')
-    monkeypatch.setattr(init, 'verifier_cle', lambda cle: init.InfoCle(1, 'x', True, cle != 'LECTURE', True))
+    monkeypatch.setattr(init, 'verifier_cle', lambda cle: init.InfoCle(4242, 'x', True, cle != 'LECTURE', True))
     _, sortie = lancer(tmp_path, zotero, secrets=['COMPLETE'])
     assert "n'a plus droit d'écriture" in sortie and init.lire_env(tmp_path)['ZOTERO_API_KEY'] == 'COMPLETE'
 
@@ -199,3 +199,69 @@ def test_guide_et_methode_copies(tmp_path, zotero):
     assert '# ' in (tmp_path / 'guide.md').read_text(encoding='utf-8')
     assert (tmp_path / 'methode.md').is_file()
     assert 'methode.md' in (tmp_path / 'config.toml').read_text(encoding='utf-8')
+
+
+def test_delai_depasse_pendant_la_lecture_de_la_reponse(tmp_path, zotero, monkeypatch):
+    """Un délai dépassé en lisant la réponse (hors d'`URLError`) donne un message, pas une trace Python."""
+    zotero.enregistrer()
+
+    class Reponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def read(self, *_):
+            raise TimeoutError('The read operation timed out')
+
+    monkeypatch.setattr(init.urllib.request, 'urlopen', lambda *a, **k: Reponse())
+    with pytest.raises(init.urllib.error.URLError, match='Zotero injoignable'):
+        init.verifier_cle('CLE')
+    _, sortie = lancer(tmp_path, zotero, secrets=['CLE'])
+    assert 'Zotero injoignable (délai de 20 secondes dépassé). Réessayer.' in sortie
+    init.ecrire_env(tmp_path, ZOTERO_API_KEY='GARDEE')
+    _, sortie = lancer(tmp_path, zotero)
+    assert 'non vérifiée' in sortie
+
+
+def test_cle_d_un_autre_compte_redemandee(tmp_path, zotero, cle_valide):
+    """La clé doit être celle du compte que Zotero synchronise sur cet ordinateur (deux comptes, personnel et
+    institutionnel). Une clé de l'autre compte n'est pas enregistrée."""
+    zotero.compte(777, 'institution')
+    zotero.enregistrer()
+    code, sortie = lancer(tmp_path, zotero, secrets=['BONNE'])
+    assert code == 0 and cle_valide == ['BONNE']
+    assert 'avec le compte que Zotero synchronise sur cet ordinateur, « institution » (n° 777)' in sortie
+    assert 'La clé API est celle du compte zotero.org n° 4242' in sortie and 'Entrée pour passer' in sortie
+    assert 'ZOTERO_API_KEY' not in init.lire_env(tmp_path)
+
+
+def test_cle_enregistree_d_un_autre_compte_a_remplacer(tmp_path, zotero, monkeypatch):
+    zotero.compte(777)
+    zotero.enregistrer()
+    init.ecrire_env(tmp_path, ZOTERO_API_KEY='AUTRE', ZOTERO_USER_ID='4242')
+    monkeypatch.setattr(init, 'verifier_cle', lambda cle: init.InfoCle(777 if cle == 'BONNE' else 4242, 'x', True,
+                                                                       True, True))
+    _, sortie = lancer(tmp_path, zotero, secrets=['BONNE'])
+    assert 'Elle est à remplacer par une clé créée' in sortie
+    assert init.lire_env(tmp_path) == {'ZOTERO_API_KEY': 'BONNE', 'ZOTERO_USER_ID': '777'}
+    # Zotero injoignable : le compte noté avec la clé est comparé à celui de la base.
+    init.ecrire_env(tmp_path, ZOTERO_API_KEY='AUTRE', ZOTERO_USER_ID='4242')
+
+    def injoignable(cle):
+        raise init.urllib.error.URLError('pas de réseau')
+
+    monkeypatch.setattr(init, 'verifier_cle', injoignable)
+    assert not init.cle_enregistree_valide(tmp_path, lambda m: None, lecture.Compte(777))
+    assert init.cle_enregistree_valide(tmp_path, lambda m: None, lecture.Compte(4242))
+
+
+def test_base_jamais_synchronisee_pas_de_cle_demandee(tmp_path, zotero, cle_valide):
+    """Sans synchronisation, aucune clé ne peut convenir : `zc init` le dit d'abord, sans en demander, et prépare le
+    dossier pour l'audit."""
+    zotero.compte(None)
+    zotero.enregistrer()
+    code, sortie = lancer(tmp_path, zotero)
+    assert code == 0 and cle_valide == [] and "jamais synchronisé" in sortie and '`zc init`' in sortie
+    assert 'ZOTERO_API_KEY' not in init.lire_env(tmp_path) and (tmp_path / 'config.toml').is_file()

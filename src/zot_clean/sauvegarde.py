@@ -53,6 +53,7 @@ class Info:
     methode: str
     version_bibliotheque: int
     taille: int
+    dossier_zotero: Path | None = None  # dossier sauvegardé, inconnu dans un descriptif écrit à la main
 
 
 def _cloner(source: Path, cible: Path) -> bool:
@@ -119,12 +120,13 @@ def sauvegarder(cfg: Config, ouvert=zotero_ouvert, maintenant: datetime | None =
             raise Refus(f'La copie de la base est endommagée ({base}). Sauvegarde abandonnée.')
     finally:
         verif.close()
-    info = Info(cible, maintenant, methode, lecture.version_bibliotheque(base), _taille(cible))
+    info = Info(cible, maintenant, methode, lecture.version_bibliotheque(base), _taille(cible), cfg.dossier_zotero)
     (cible / DESCRIPTIF).write_text(json.dumps({
         'date': maintenant.isoformat(timespec='seconds'), 'methode': methode, 'dossier_zotero': str(cfg.dossier_zotero),
         'version_bibliotheque': info.version_bibliotheque, 'taille': info.taille, 'zc': __version__},
         ensure_ascii=False, indent=1), encoding='utf-8')
-    for ancienne in lister(cfg)[cfg.sauvegarde.conserver:]:
+    # Au moins une, celle qui vient d'être faite (`config.charger` refuse déjà moins).
+    for ancienne in lister(cfg)[max(1, cfg.sauvegarde.conserver):]:
         shutil.rmtree(ancienne.dossier)
     return info
 
@@ -137,14 +139,27 @@ def lister(cfg: Config) -> list[Info]:
             f = d / DESCRIPTIF
             if f.is_file():
                 j = json.loads(f.read_text(encoding='utf-8'))
+                z = j.get('dossier_zotero')
                 res.append(Info(d, datetime.fromisoformat(j['date']), j['methode'], j['version_bibliotheque'],
-                                j['taille']))
+                                j['taille'], Path(z) if z else None))
     return sorted(res, key=lambda i: i.date, reverse=True)
 
 
+def _meme_dossier(a: Path, b: Path) -> bool:
+    try:
+        return a.expanduser().resolve() == b.expanduser().resolve()
+    except OSError:
+        return a == b
+
+
 def recente(cfg: Config, maintenant: datetime | None = None) -> Info | None:
+    """Sauvegarde récente du dossier Zotero de la configuration. Celle d'un autre dossier (`[sauvegarde] dossier`
+    commun à deux bibliothèques, `[zotero] dossier` changé depuis) ne compte pas. Un descriptif sans dossier
+    (écrit à la main) est accepté."""
     maintenant = maintenant or datetime.now().astimezone()
     for i in lister(cfg):
+        if i.dossier_zotero and not _meme_dossier(i.dossier_zotero, cfg.dossier_zotero):
+            continue
         if maintenant - i.date <= timedelta(hours=cfg.sauvegarde.delai_heures):
             return i
     return None

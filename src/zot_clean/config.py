@@ -143,19 +143,46 @@ class Config:
         return self.sauvegarde.dossier or z.parent / f'{z.name}-sauvegardes'
 
 
+def est_dossier_de_travail(dossier: Path) -> bool:
+    """`dossier` contient-il un `config.toml` de zot-clean ? Le fichier doit se lire et avoir une section [zotero],
+    que `zc init` écrit toujours. Un `config.toml` d'un autre logiciel n'est pas pris pour celui de `zc`."""
+    try:
+        brut = tomllib.loads((dossier / FICHIER).read_text(encoding='utf-8'))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+        return False
+    return isinstance(brut.get('zotero'), dict)
+
+
 def trouver_dossier(depart: Path | None = None) -> Path | None:
-    """Premier dossier contenant un `config.toml`, en remontant depuis `depart`."""
+    """Premier dossier de travail de zot-clean, en remontant depuis `depart`. Les `config.toml` étrangers sont sautés."""
     depart = (depart or Path.cwd()).resolve()
     for d in (depart, *depart.parents):
-        if (d / FICHIER).is_file():
+        if est_dossier_de_travail(d):
             return d
     return None
 
 
 def charger(dossier: Path | None = None) -> Config:
-    dossier = dossier or trouver_dossier() or Path.cwd()
+    """Configuration du dossier de travail désigné (`--dossier`), qui doit contenir un `config.toml`, ou à défaut du
+    premier trouvé en remontant depuis le dossier courant. Hors d'un dossier de travail, la commande est refusée,
+    plutôt que de créer `rapports/` ou `suivi/` n'importe où."""
+    if dossier is None:
+        dossier = trouver_dossier()
+        if dossier is None:
+            ici = Path.cwd()
+            etranger = (f" Le {FICHIER} de ce dossier n'est pas reconnu, faute de section [zotero] (celle qu'écrit "
+                        "`zc init`, avec la ligne dossier = …).") if (ici / FICHIER).is_file() else ''
+            raise SystemExit(f"Aucun dossier de travail de zot-clean ici ({ici}) ni dans les dossiers au-dessus."
+                             f"{etranger} Se placer dans le dossier créé par `zc init` (celui qui contient "
+                             f"{FICHIER}) ou le désigner par --dossier. Pour en créer un, lancer `zc init`.")
+    elif not (dossier / FICHIER).is_file():
+        raise SystemExit(f"{dossier} n'est pas un dossier de travail de zot-clean (aucun {FICHIER}). Désigner le "
+                         "dossier créé par `zc init`, ou en créer un avec `zc init`.")
     chemin = dossier / FICHIER
-    brut = tomllib.loads(chemin.read_text(encoding='utf-8')) if chemin.is_file() else {}
+    try:
+        brut = tomllib.loads(chemin.read_text(encoding='utf-8'))
+    except tomllib.TOMLDecodeError as e:
+        raise SystemExit(f'{chemin} illisible ({e}). Corriger le fichier, par exemple un guillemet oublié.') from None
     cfg = Config(dossier_travail=dossier)
     if d := brut.get('zotero', {}).get('dossier'):
         cfg.dossier_zotero = Path(d).expanduser()
@@ -170,6 +197,10 @@ def charger(dossier: Path | None = None) -> Config:
     cfg.tags = _section(brut, 'tags', Tags, chemin)
     if cfg.sauvegarde.dossier:
         cfg.sauvegarde.dossier = Path(cfg.sauvegarde.dossier).expanduser()
+    if not isinstance(cfg.sauvegarde.conserver, int) or cfg.sauvegarde.conserver < 1:
+        # À 0, la sauvegarde qu'on vient de faire serait aussitôt supprimée.
+        raise SystemExit(f'{chemin} : [sauvegarde] conserver doit valoir au moins 1 (nombre de sauvegardes '
+                         f'gardées), et non {cfg.sauvegarde.conserver!r}.')
     return cfg
 
 

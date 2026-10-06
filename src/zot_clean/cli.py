@@ -10,22 +10,47 @@ from pathlib import Path
 
 from zot_clean import __version__
 
-# Messages d'argparse en français (D4). argparse les fait passer par sa fonction `_`, un message absent de la table
-# (autre version de Python) reste en anglais.
+# Messages d'argparse en français (D4). argparse les fait passer par ses fonctions `_` et `ngettext`, remplacées ici.
+# Un message absent de la table (autre version de Python) reste en anglais. Clés reprises telles quelles des versions
+# 3.11 à 3.14 d'argparse.
 MESSAGES_ARGPARSE = {
     'usage: ': 'usage : ',
+    '%(heading)s:': '%(heading)s :',
     'positional arguments': 'arguments',
     'optional arguments': 'options',
+    'options': 'options',
     'show this help message and exit': 'affiche cette aide',
     "show program's version number and exit": 'affiche la version',
+    ' (default: %(default)s)': ' (par défaut, %(default)s)',
     'the following arguments are required: %s': 'arguments obligatoires manquants : %s',
+    'one of the arguments %s is required': "l'un des arguments %s est obligatoire",
     'unrecognized arguments: %s': 'arguments non reconnus : %s',
     'invalid choice: %(value)r (choose from %(choices)s)': 'choix invalide : %(value)r (au choix : %(choices)s)',
+    'invalid choice: %(value)r, maybe you meant %(closest)r?': 'choix invalide : %(value)r, peut-être %(closest)r ?',
+    'unknown parser %(parser_name)r (choices: %(choices)s)':
+        'commande inconnue : %(parser_name)r (au choix : %(choices)s)',
+    'invalid %(type)s value: %(value)r': 'valeur invalide (%(type)s) : %(value)r',
     '%(prog)s: error: %(message)s\n': '%(prog)s : erreur : %(message)s\n',
     'argument %(argument_name)s: %(message)s': 'argument %(argument_name)s : %(message)s',
     'expected one argument': 'une valeur attendue',
+    'expected at most one argument': 'une valeur au plus attendue',
+    'expected at least one argument': 'au moins une valeur attendue',
+    'expected %s argument': '%s valeur attendue',
+    'expected %s arguments': '%s valeurs attendues',
+    'not allowed with argument %s': "incompatible avec l'argument %s",
+    'ambiguous option: %(option)s could match %(matches)s': 'option ambiguë : %(option)s peut désigner %(matches)s',
+    'ignored explicit argument %r': 'valeur %r non admise par cette option',
+    'unexpected option string: %s': 'option inattendue : %s',
 }
+
+
+def _traduire_pluriel(singulier: str, pluriel: str, n: int) -> str:
+    message = singulier if n == 1 else pluriel
+    return MESSAGES_ARGPARSE.get(message, message)
+
+
 argparse._ = lambda message: MESSAGES_ARGPARSE.get(message, message)
+argparse.ngettext = _traduire_pluriel
 
 # Commandes pas encore disponibles, avec leur jalon (D31), listées dans l'aide. `trier`, prévue pour la v0.3, est
 # devenue `zc inbox` (D135) et n'y figure plus.
@@ -83,7 +108,9 @@ def audit(args) -> int:
     except (FileNotFoundError, lecture.SchemaInconnu) as e:
         print(e, file=sys.stderr)
         return 2
-    en_ligne, motif = _fichiers_en_ligne(cfg, a.absents_importes(b)) if not args.hors_ligne else (None, 'option --hors-ligne')
+    client = _client_du_compte(cfg, b, args.hors_ligne)
+    en_ligne, motif = (_fichiers_en_ligne(cfg, b, a.absents_importes(b), client) if not args.hors_ligne
+                       else (None, 'option --hors-ligne'))
     sections = a.auditer(b, cfg, empreintes=not args.sans_empreintes, en_ligne=en_ligne, motif=motif)
     from zot_clean import controle as k, filtre
     section, memoire = k.plan_du_fonds(b, cfg, filtre.cles_masquees(b, cfg))
@@ -110,22 +137,77 @@ def audit(args) -> int:
     return 0
 
 
-def _fichiers_en_ligne(cfg, cles: list[str], client=None) -> tuple[dict[str, bool] | None, str]:
-    """Fichiers absents du disque encore stockés sur zotero.org (D133), ou None et la raison."""
+def _client_du_compte(cfg, b, hors_ligne: bool):
+    """Client de la clé pour l'audit, None sans clé (audit de la seule copie locale, comme avant). Refus si la clé
+    n'est pas celle du compte synchronisé, comme pour toute commande qui se sert de la clé. L'audit est
+    la première commande d'une séance, et le refus y arrive avant un rapport complet sur lequel on préparerait un
+    travail que toutes les commandes suivantes refuseraient. Les fichiers absents y seraient d'ailleurs cherchés
+    dans une autre bibliothèque, et tous donnés pour perdus. `--hors-ligne` ne se sert pas de la clé, l'audit de la
+    copie locale se fait, avec le refus en avertissement."""
+    from zot_clean import appliquer as a, ecriture
+    try:
+        client = ecriture.depuis_config(cfg)
+    except SystemExit:
+        return None
+    try:
+        a.controler_compte(client.utilisateur, b.compte)
+    except ecriture.Refus as e:
+        if hors_ligne:
+            print(f'Attention. {e}\n')
+            return None
+        raise ecriture.Refus(f"{e}\nEn attendant, `zc audit --hors-ligne` fait l'audit de la seule bibliothèque "
+                             'de cet ordinateur, sans se servir de la clé.') from None
+    return client
+
+
+# Fichiers trouvés sur zotero.org, clé de la pièce jointe -> version de l'élément. Hors de `cache/*.json`, que
+# `--rafraichir` vide pour les seules sources de métadonnées.
+EN_LIGNE = Path('zotero') / 'fichiers_en_ligne.json'
+
+
+def _fichiers_en_ligne(cfg, b, cles: list[str], client=None) -> tuple[dict[str, bool] | None, str]:
+    """Fichiers absents du disque encore stockés sur zotero.org (D133), ou None et la raison. Un fichier trouvé est
+    retenu avec la version de sa pièce jointe et n'est plus demandé tant qu'elle ne change pas. Un fichier introuvable
+    est redemandé à chaque fois, puisqu'il peut arriver d'un autre ordinateur avant que Zotero ne reçoive la nouvelle
+    version, et ces fichiers perdus sont peu nombreux."""
     from zot_clean import ecriture
     if not cles:
         return {}, ''
+    versions = {p.cle: p.version for p in b.pieces.values() if p.version}  # 0 : jamais synchronisée
+    fichier = cfg.cache / EN_LIGNE
+    try:
+        memoire = json.loads(fichier.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        memoire = {}
+    # Seules restent les pièces jointes encore là et inchangées.
+    memoire = {k: v for k, v in memoire.items() if v and versions.get(k) == v} if isinstance(memoire, dict) else {}
+    res = {cle: True for cle in cles if cle in memoire}
+    a_chercher = [cle for cle in cles if cle not in res]
+
+    def retenir():
+        try:
+            fichier.parent.mkdir(parents=True, exist_ok=True)
+            fichier.write_text(json.dumps(memoire, sort_keys=True), encoding='utf-8')
+        except OSError:
+            pass  # sans mémoire, le prochain audit redemande ces fichiers
+
+    if not a_chercher:
+        retenir()
+        return res, ''
     try:
         client = client or ecriture.depuis_config(cfg)
     except SystemExit:
         return None, 'pas de clé API'
-    res = {}
     try:
-        for i, cle in enumerate(cles, 1):
+        for i, cle in enumerate(a_chercher, 1):
             res[cle] = client.fichier_en_ligne(cle)
-            if i % 50 == 0 or i == len(cles):
-                print(f'{i}/{len(cles)} fichiers absents cherchés sur zotero.org', file=sys.stderr)
+            if res[cle] and versions.get(cle):
+                memoire[cle] = versions[cle]
+            if i % 50 == 0 or i == len(a_chercher):
+                print(f'{i}/{len(a_chercher)} fichiers absents cherchés sur zotero.org', file=sys.stderr)
+                retenir()
     except ecriture.ErreurAPI:
+        retenir()
         return None, 'zotero.org injoignable'
     return res, ''
 
@@ -139,6 +221,7 @@ def _inbox(args, preparer: bool) -> int:
             print(f'Attention. {avert}')
         client = ecriture.depuis_config(cfg)
         b = lecture.lire(cfg.base) if preparer else a.lire_a_jour(cfg, client, _progression)
+        a.controler_compte(client.utilisateur, b.compte)  # déjà fait par `lire_a_jour`, pas par la seule lecture
         services = sources.depuis_config(cfg)
         schema = lecture.lire_types(cfg.base)
         if preparer:
@@ -268,17 +351,21 @@ def appliquer(args) -> int:
 
 
 def annuler(args) -> int:
-    from zot_clean import annulation, config, ecriture, filtre, lecture, plans
-    from zot_clean.ecriture import ErreurAPI
+    from zot_clean import annulation, appliquer as a, config, ecriture, filtre, lecture, plans
+    from zot_clean.ecriture import ErreurAPI, Refus
     cfg = config.charger(args.dossier)
     journaux = annulation.journaux_vises(args.cible.resolve(), cfg)
+    client = ecriture.depuis_config(cfg)
     try:
-        masquees = filtre.cles_masquees(lecture.lire(cfg.base), cfg)
+        b = lecture.lire(cfg.base)
+        masquees = filtre.cles_masquees(b, cfg)
     except (FileNotFoundError, lecture.SchemaInconnu):
-        masquees = None  # base illisible : toutes les fiches masquées dans le rapport (D126)
+        b, masquees = None, None  # base illisible : toutes les fiches masquées dans le rapport (D126)
     try:
-        plan, rapport = annulation.planifier(journaux, ecriture.depuis_config(cfg), masquees)
-    except ErreurAPI as e:
+        if b is not None:  # base illisible : `zc appliquer`, qui la relit, refusera s'il le faut
+            a.controler_compte(client.utilisateur, b.compte)
+        plan, rapport = annulation.planifier(journaux, client, masquees)
+    except (ErreurAPI, Refus) as e:
         print(e, file=sys.stderr)
         return 1
     if not plan.groupes:
@@ -320,12 +407,13 @@ def doublons_planifier(args) -> int:
         if avert := a.controler_synchronisation(cfg):
             print(f'Attention. {avert}')
         b = a.lire_a_jour(cfg, ecriture.depuis_config(cfg), _progression)
-        plan, rapport = d.planifier(cfg, ecriture.depuis_config(cfg), b, args.surs)
+        plan, rapport = d.planifier(cfg, ecriture.depuis_config(cfg), b)
     except (Refus, ErreurAPI, FileNotFoundError, lecture.SchemaInconnu) as e:
         print(e, file=sys.stderr)
         return 1
     if not plan.groupes:
-        print('Aucun groupe à fusionner. Décider les groupes avec `zc doublons accepter`, ou utiliser --surs.')
+        print('Aucun groupe à fusionner. Décider les groupes avec `zc doublons accepter` (--surs pour tous les '
+              'groupes sûrs).')
         return 0
     chemin = plans.ecrire(plan, cfg.plans, rapport)
     print(f'{len(plan.groupes)} groupe(s) à fusionner, {plan.nb_operations} opération(s).')
@@ -849,7 +937,7 @@ def noms_planifier(args) -> int:
         stockage = bbt.stockage_fichiers(cfg.dossier_zotero)
         # Un fichier absent n'est renommé que s'il est stocké sur zotero.org et que Zotero y synchronise (D158).
         en_ligne, motif = (None, 'option --hors-ligne') if args.hors_ligne else (
-            _fichiers_en_ligne(cfg, n.absents(b), client) if stockage == bbt.ZOTERO_ORG else ({}, ''))
+            _fichiers_en_ligne(cfg, b, n.absents(b), client) if stockage == bbt.ZOTERO_ORG else ({}, ''))
         if motif:
             print(f'Fichiers absents du disque non cherchés sur zotero.org ({motif}), ils ne seront pas renommés.')
         plan, rapport = n.planifier(b, cfg, client, en_ligne, stockage)
@@ -946,7 +1034,6 @@ def analyseur() -> argparse.ArgumentParser:
     t.add_argument('--dossier', type=chemin, help='dossier de travail')
     t.set_defaults(action=doublons_chercher)
     t = ss.add_parser('planifier', help='Prépare le plan de fusion des groupes décidés')
-    t.add_argument('--surs', action='store_true', help='inclut les groupes sûrs sans décision')
     t.add_argument('--dossier', type=chemin, help='dossier de travail')
     t.set_defaults(action=doublons_planifier)
     t = ss.add_parser('accepter', help='Décide de fusionner des groupes, ou tous les groupes sûrs (--surs)')
@@ -1141,7 +1228,7 @@ def _enregistrer_duree(args, argv: list[str], debut: float, code: int) -> None:
     quitte l'ordinateur, et un échec d'écriture n'empêche jamais la commande."""
     from zot_clean import config
     try:
-        dossier = args.dossier if args.commande == 'init' else config.trouver_dossier(getattr(args, 'dossier', None))
+        dossier = args.dossier if args.commande == 'init' else getattr(args, 'dossier', None) or config.trouver_dossier()
         if not dossier or not (dossier / config.FICHIER).is_file():
             return
         commande = ' '.join(x for x in (args.commande, getattr(args, 'sous_commande', None)) if x)
@@ -1159,10 +1246,13 @@ def _enregistrer_duree(args, argv: list[str], debut: float, code: int) -> None:
 def executer(args) -> int:
     """Lance la commande. Tout refus ou échec sort avec un code non nul et son message sur la sortie d'erreur, pour
     qu'un agent qui teste le code de retour le voie (répétition du pilote). Les refus des modules passent par
-    `SystemExit(message)`, ceux de l'écriture par `Refus` et `ErreurAPI`."""
+    `SystemExit(message)`, ceux de l'écriture par `Refus` et `ErreurAPI`. Les lectures de la base faites par la
+    commande se partagent une seule copie (`lecture.partager`)."""
+    from zot_clean import lecture
     from zot_clean.ecriture import ErreurAPI, Refus
     try:
-        code = args.action(args)
+        with lecture.partager():
+            code = args.action(args)
     except SystemExit as e:
         if e.code is None or isinstance(e.code, int):
             raise

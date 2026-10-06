@@ -63,9 +63,9 @@ def charger(cfg: Config) -> list[Entree]:
 
 
 def _annotee(b: Bibliotheque, ids: dict[str, int], notes: set[int], cle: str) -> int:
-    """Nombre d'annotations et de notes portées par une copie."""
+    """Nombre d'annotations et de notes portées par une copie, sa note propre comprise (D206)."""
     i = ids.get(cle)
-    return (b.annotations.get(i, 0) + (i in notes)) if i is not None else 0
+    return (b.annotations.get(i, 0) + (i in notes) + b.pieces[i].note) if i is not None else 0
 
 
 def ecrire(cfg: Config, entrees: list[Entree], b: Bibliotheque) -> None:

@@ -268,6 +268,9 @@ class Crossref(Source):
                       m.get('language', ''), m.get('abstract', ''))
 
 
+BUDGET_OPENALEX = 'openalex_budget.json'  # recherches du jour, gardé quand le cache est vidé
+
+
 class OpenAlex(Source):
     """Lecture par DOI gratuite, recherches seulement avec une clé et sous un plafond quotidien (D74)."""
     nom = 'openalex'
@@ -277,7 +280,7 @@ class OpenAlex(Source):
         super().__init__(dossier_cache, **kw)
         self.cle, self.plafond = cle, plafond
         self._aujourdhui = aujourdhui or (lambda: date.today().isoformat())
-        self.fichier_budget = dossier_cache / 'openalex_budget.json'
+        self.fichier_budget = dossier_cache / BUDGET_OPENALEX
         self._budget = (json.loads(self.fichier_budget.read_text(encoding='utf-8'))
                         if self.fichier_budget.is_file() else {'jour': '', 'recherches': 0})
 
@@ -591,8 +594,10 @@ class Services:
 
 def depuis_config(cfg: Config, rafraichir: bool = False, client_http: httpx2.Client | None = None, **kw) -> Services:
     if rafraichir:
+        # Les réponses seulement. Le compte des recherches du jour reste, sinon le plafond d'OpenAlex repartirait de 0.
         for f in cfg.cache.glob('*.json'):
-            f.unlink()
+            if f.name != BUDGET_OPENALEX:
+                f.unlink()
     commun = dict(contact=cfg.sources.contact, debit=cfg.sources.debit, client_http=client_http, **kw)
     sources: list[Source] = []
     if cfg.sources.crossref:

@@ -1,3 +1,4 @@
+import copy
 import itertools
 import tomllib
 
@@ -5,7 +6,7 @@ import pytest
 
 from faux_serveur import FauxServeur
 from test_appliquer import ecrire
-from zot_clean import annulation, audit, doublons as d, lecture, plans
+from zot_clean import annulation, audit, doublons as d, filtre, lecture, plans
 from zot_clean.appliquer import ESSAI, appliquer
 from zot_clean.config import Config
 
@@ -26,12 +27,14 @@ class Double:
                              **{k: v for k, v in champs.items() if k in ('DOI', 'ISBN', 'publicationTitle')})
         return cle
 
-    def pdf(self, parent, nom, contenu=b'%PDF identique', annotee=False):
+    def pdf(self, parent, nom, contenu=b'%PDF identique', annotee=False, note=''):
+        """`note` : note de la pièce jointe elle-même (champ `note` de l'élément `attachment`)."""
         cle = self.serveur._cle()
-        iid = self.zotero.pdf(self.ids[parent], nom, contenu, cle=cle)
+        iid = self.zotero.pdf(self.ids[parent], nom, contenu, cle=cle, note=note)
         if annotee:
             self.zotero.annotation(iid)
-        self.serveur.ajouter('attachment', key=cle, parentItem=parent, title=nom, linkMode='imported_file')
+        self.serveur.ajouter('attachment', key=cle, parentItem=parent, title=nom, linkMode='imported_file',
+                             note=note)
         return cle
 
     def note(self, parent):
@@ -41,6 +44,13 @@ class Double:
 
     def bibliotheque(self):
         return lecture.lire(self.zotero.enregistrer())
+
+
+def accepter_surs(cfg, b):
+    """Les groupes sûrs acceptés en bloc, comme le fait `zc doublons accepter --surs` (D49)."""
+    entrees = d.charger_suivi(cfg)
+    d.decider(entrees, True)
+    d.ecrire_suivi(cfg, entrees, b)
 
 
 @pytest.fixture
@@ -100,7 +110,8 @@ def test_fusion_a_la_maniere_de_zotero_puis_annulation(double, serveur, cfg):
 
     b = double.bibliotheque()
     d.chercher(b, cfg)
-    plan, rapport = d.planifier(cfg, serveur.client(), b, avec_surs=True)
+    accepter_surs(cfg, b)
+    plan, rapport = d.planifier(cfg, serveur.client(), b)
     assert len(plan.groupes) == 1
     ops = {op.cle: op for op in plan.groupes[0].operations}
     assert ops[pdf_identique].apres == {'deleted': True}
@@ -126,6 +137,135 @@ def test_fusion_a_la_maniere_de_zotero_puis_annulation(double, serveur, cfg):
     for k, v in avant.items():
         assert {c: x for c, x in serveur.elements[k].items() if c != 'version'} == \
                {c: x for c, x in v.items() if c != 'version'}
+
+
+def test_meme_doi_titres_differents_a_juger(double, serveur, cfg):
+    """Un même DOI ne suffit pas quand les titres diffèrent (erratum saisi avec le DOI de l'article, chapitre
+    importé avec celui de l'ouvrage) : le groupe est à juger, et rien ne fusionne sans décision (D49)."""
+    a = double.fiche('Perceptual learning of categorical colour', DOI='10.1/col')
+    b_ = double.fiche('Erratum to: Perceptual learning of categorical colour', DOI='10.1/col')
+    c = double.fiche('Language and thought', DOI='10.1/livre', auteurs=('Vygotski',))
+    e = double.fiche('Thought and word', DOI='10.1/livre', auteurs=('Vygotski',))
+    f = double.fiche('Radical embodied cognitive science', DOI='10.1/rad', auteurs=('Chemero',))
+    g = double.fiche('Radical Embodied Cognitive Science.', DOI='10.1/RAD', auteurs=('Chemero',), date='2009')
+    b = double.bibliotheque()
+    classes = {frozenset(x.cles): x.classe for x in d.chercher(b, cfg)}
+    assert classes == {frozenset({a, b_}): d.A_JUGER, frozenset({c, e}): d.A_JUGER, frozenset({f, g}): d.SUR}
+    # Sans décision, même un groupe sûr ne fusionne pas.
+    plan, rapport = d.planifier(cfg, serveur.client(), b)
+    assert plan.groupes == [] and '3 groupe(s) restent à juger' in rapport
+    accepter_surs(cfg, b)
+    plan, _ = d.planifier(cfg, serveur.client(), b)
+    assert [sorted(op.cle for op in g.operations) for g in plan.groupes] == [sorted([f, g])]
+
+
+def test_planifier_n_a_plus_d_option_surs(double, cfg, capsys):
+    """`zc doublons planifier --surs` fusionnait les groupes sûrs sans décision : l'option n'existe plus, la
+    décision passe par `zc doublons accepter --surs`."""
+    import inspect
+    from zot_clean.cli import main
+    assert list(inspect.signature(d.planifier).parameters) == ['cfg', 'client', 'b']
+    with pytest.raises(SystemExit) as sortie:
+        main(['doublons', 'planifier', '--surs'])
+    assert sortie.value.code == 2 and '--surs' in capsys.readouterr().err
+
+
+def test_copie_identique_avec_note_de_piece_jointe_rattachee(double, serveur, cfg):
+    """D51 : une copie identique qui porte une note (celle de la pièce jointe elle-même) n'est pas mise à la
+    corbeille, elle est rattachée comme une copie annotée, sans que le texte de la note sorte (D191)."""
+    garde = double.fiche('Perceptual learning of categorical colour', DOI='10.1/col', ajout='2014-01-01')
+    absorbee = double.fiche('Perceptual learning of categorical colour', DOI='10.1/col', ajout='2020-01-01')
+    double.pdf(garde, 'a.pdf')
+    double.pdf(garde, 'e.pdf', contenu=b'%PDF e')
+    avec_note = double.pdf(absorbee, 'b.pdf', note='<p>Chapitre trois à relire</p>')
+    sans_note = double.pdf(absorbee, 'c.pdf', note='')
+    b = double.bibliotheque()
+    d.chercher(b, cfg)
+    accepter_surs(cfg, b)
+    plan, rapport = d.planifier(cfg, serveur.client(), b)
+    ops = {op.cle: op for op in plan.groupes[0].operations}
+    assert ops[avec_note].apres == {'parentItem': garde} and 'gardée pour sa note' in ops[avec_note].nature
+    assert ops[sans_note].apres == {'deleted': True}
+    assert 'Chapitre trois' not in rapport and 'Chapitre trois' not in plans.ecrire(plan, cfg.plans, rapport).read_text(
+        encoding='utf-8')
+
+
+def test_liens_des_fiches_absorbees_reportes_comme_dans_zotero(double, serveur, cfg):
+    """Comme `moveRelations` de Zotero : les relations d'une fiche absorbée passent sur la fiche conservée, sauf un
+    lien vers elle-même, l'absorbée perd ses `dc:replaces`, et une fiche liée qui pointait vers l'absorbée pointe
+    désormais vers la fiche conservée. L'annulation remet tout en place."""
+    garde = double.fiche('Perceptual learning of categorical colour', DOI='10.1/col', ajout='2014-01-01')
+    absorbee = double.fiche('Perceptual learning of categorical colour', DOI='10.1/col', ajout='2020-01-01')
+    liee = double.fiche('Colour categories in infancy', auteurs=('Franklin',), tags=('_privé',))
+    autre = double.fiche('Une fiche sans rapport', auteurs=('Autre',))
+    u = serveur.client().uri
+    groupe, vieille = 'http://zotero.org/groups/77/items/ABCD2345', u('VIEILLE2')
+    serveur.elements[absorbee]['relations'] = {'dc:relation': [u(liee), u(garde)], 'owl:sameAs': groupe,
+                                               'dc:replaces': vieille}
+    serveur.elements[garde]['relations'] = {'dc:relation': u(absorbee)}
+    serveur.elements[liee]['relations'] = {'dc:relation': [u(absorbee), u(autre)]}
+    serveur.elements[autre]['relations'] = {'dc:relation': u(liee)}
+    avant = copy.deepcopy(serveur.elements)
+
+    b = double.bibliotheque()
+    d.chercher(b, cfg)
+    accepter_surs(cfg, b)
+    plan, rapport = d.planifier(cfg, serveur.client(), b)
+    ops = {op.cle: op for op in plan.groupes[0].operations}
+    rel = lambda v: plans.normaliser('relations', v)
+    # Le lien de la fiche conservée vers l'absorbée reste, comme dans Zotero, et aucun lien vers elle-même.
+    assert rel(ops[garde].apres['relations']) == rel({'dc:relation': [u(absorbee), u(liee)], 'owl:sameAs': [groupe],
+                                                      'dc:replaces': [vieille, u(absorbee)]})
+    assert ops[liee].rang == 1 and rel(ops[liee].avant['relations']) == rel(avant[liee]['relations'])
+    assert rel(ops[liee].apres['relations']) == rel({'dc:relation': [u(garde), u(autre)]})
+    assert autre not in ops
+    assert ops[absorbee].rang == 2 and ops[absorbee].apres == {
+        'deleted': True, 'relations': {'dc:relation': [u(liee), u(garde)], 'owl:sameAs': [groupe]}}
+    # La fiche liée est confidentielle : sa clé seulement.
+    assert f'fiche liée {liee} {filtre.MASQUE}' in rapport and 'infancy' not in rapport
+
+    bilan = appliquer(plan, ecrire(plan, cfg), serveur.client(), cfg, ESSAI)
+    assert bilan.faits == ['1']
+    assert rel(serveur.elements[liee]['relations']) == rel({'dc:relation': [u(garde), u(autre)]})
+    assert serveur.elements[absorbee]['deleted'] and 'dc:replaces' not in serveur.elements[absorbee]['relations']
+
+    plan_a, _ = annulation.planifier([bilan.journal], serveur.client(), set())
+    appliquer(plan_a, plans.ecrire(plan_a, cfg.plans, ''), serveur.client(), cfg, ESSAI)
+    for k, v in avant.items():
+        actuel = serveur.elements[k]
+        assert {c: x for c, x in actuel.items() if c not in ('version', 'relations')} == \
+               {c: x for c, x in v.items() if c not in ('version', 'relations')}
+        assert rel(actuel['relations']) == rel(v['relations'])
+
+
+def test_liens_entre_deux_groupes_du_meme_plan(double, serveur, cfg):
+    """Deux doublons liés l'un à l'autre, chacun dans son groupe : comme deux fusions successives dans Zotero, les
+    deux fiches conservées finissent liées entre elles. Le second groupe part de l'état laissé par le premier."""
+    a2 = double.fiche('Alpha, a study of colour', DOI='10.1/alpha', ajout='2014-01-01')
+    a1 = double.fiche('Alpha, a study of colour', DOI='10.1/alpha', ajout='2020-01-01')
+    b2 = double.fiche('Beta, a study of form', DOI='10.1/beta', ajout='2014-01-01')
+    b1 = double.fiche('Beta, a study of form', DOI='10.1/beta', ajout='2020-01-01')
+    u = serveur.client().uri
+    serveur.elements[a1]['relations'] = {'dc:relation': [u(b1)]}
+    serveur.elements[b1]['relations'] = {'dc:relation': [u(a1)]}
+    avant = copy.deepcopy(serveur.elements)
+    b = double.bibliotheque()
+    d.chercher(b, cfg)
+    accepter_surs(cfg, b)
+    plan, _ = d.planifier(cfg, serveur.client(), b)
+    assert [g.titre for g in plan.groupes] == ['Alpha, a study of colour', 'Beta, a study of form']
+    bilan = appliquer(plan, ecrire(plan, cfg), serveur.client(), cfg, ESSAI)
+    assert bilan.faits == ['1', '2'] and not bilan.conflits
+    rel = lambda k: plans.normaliser('relations', serveur.elements[k]['relations'])
+    assert rel(a2) == {'dc:relation': [u(b2)], 'dc:replaces': [u(a1)]}
+    assert rel(b2) == {'dc:relation': [u(a2)], 'dc:replaces': [u(b1)]}
+
+    plan_a, _ = annulation.planifier([bilan.journal], serveur.client(), set())
+    bilan_a = appliquer(plan_a, plans.ecrire(plan_a, cfg.plans, ''), serveur.client(), cfg, ESSAI)
+    assert not bilan_a.conflits and not bilan_a.partiels
+    for k, v in avant.items():
+        assert rel(k) == plans.normaliser('relations', v['relations'])
+        assert bool(serveur.elements[k].get('deleted')) == bool(v.get('deleted'))
 
 
 def test_types_differents_ecartes(double, serveur, cfg):
@@ -175,7 +315,8 @@ def test_fiches_confidentielles_masquees(double, serveur, cfg):
     b = double.bibliotheque()
     d.chercher(b, cfg)
     assert 'médical' not in (cfg.suivi / d.FICHIER).read_text(encoding='utf-8')
-    plan, rapport = d.planifier(cfg, serveur.client(), b, avec_surs=True)
+    accepter_surs(cfg, b)
+    plan, rapport = d.planifier(cfg, serveur.client(), b)
     assert len(plan.groupes) == 1 and plan.groupes[0].titre == '(fiche confidentielle)'
     chemin = plans.ecrire(plan, cfg.plans, rapport)
     for texte in (rapport, chemin.read_text(encoding='utf-8')):
@@ -190,7 +331,8 @@ def test_cle_de_citation_de_la_fiche_absorbee_signalee(double, serveur, cfg):
     serveur.elements[absorbee]['citationKey'] = 'durandEmbodied2020a'
     b = double.bibliotheque()
     d.chercher(b, cfg)
-    plan, rapport = d.planifier(cfg, serveur.client(), b, avec_surs=True)
+    accepter_surs(cfg, b)
+    plan, rapport = d.planifier(cfg, serveur.client(), b)
     assert f'clé de citation « durandEmbodied2020a » de {absorbee} qui disparaît' in rapport
     assert 'gardant « durandEmbodied2020 »' in rapport
     # Signalée à part, et non parmi les autres valeurs différentes.
@@ -198,7 +340,7 @@ def test_cle_de_citation_de_la_fiche_absorbee_signalee(double, serveur, cfg):
 
     # Fiche conservée sans clé : elle reçoit celle de la fiche absorbée, rien ne disparaît.
     serveur.elements[garde]['citationKey'] = ''  # l'API rend le champ vide
-    plan, rapport = d.planifier(cfg, serveur.client(), b, avec_surs=True)
+    plan, rapport = d.planifier(cfg, serveur.client(), b)
     ops = {op.cle: op for op in plan.groupes[0].operations}
     assert ops[garde].apres['citationKey'] == 'durandEmbodied2020a' and 'qui disparaît' not in rapport
 
@@ -213,7 +355,8 @@ def test_fiche_conservee_reprend_la_cle_sans_suffixe(double, serveur, cfg):
     serveur.elements[absorbee]['citationKey'] = 'durandEmbodied2020'
     b = double.bibliotheque()
     d.chercher(b, cfg)
-    plan, rapport = d.planifier(cfg, serveur.client(), b, avec_surs=True)
+    accepter_surs(cfg, b)
+    plan, rapport = d.planifier(cfg, serveur.client(), b)
     ops = {op.cle: op for op in plan.groupes[0].operations}
     assert ops[garde].apres['citationKey'] == 'durandEmbodied2020'
     assert f'clé de citation « durandEmbodied2020a » de {garde} remplacée par « durandEmbodied2020 »' in rapport
@@ -226,7 +369,8 @@ def test_cle_de_citation_masquee_pour_une_fiche_confidentielle(double, serveur, 
     serveur.elements[absorbee]['citationKey'] = 'moiDossier2020a'
     b = double.bibliotheque()
     d.chercher(b, cfg)
-    _, rapport = d.planifier(cfg, serveur.client(), b, avec_surs=True)
+    accepter_surs(cfg, b)
+    _, rapport = d.planifier(cfg, serveur.client(), b)
     assert f'clé de citation de {absorbee} qui disparaît' in rapport and 'Dossier2020' not in rapport
 
 
@@ -238,7 +382,8 @@ def test_pdf_absents_signales_dans_le_plan(double, serveur, cfg):
     copie = double.pdf(absorbee, 'a.pdf', None)
     b = double.bibliotheque()
     d.chercher(b, cfg)
-    plan, rapport = d.planifier(cfg, serveur.client(), b, avec_surs=True)
+    accepter_surs(cfg, b)
+    plan, rapport = d.planifier(cfg, serveur.client(), b)
     ops = {op.cle: op for op in plan.groupes[0].operations}
     assert ops[copie].apres == {'parentItem': garde}
     assert '**Attention.** 2 PDF absents du disque' in rapport and 'rattachée à la fiche conservée' in rapport
@@ -317,7 +462,8 @@ def test_note_ajoutee_a_la_fiche_absorbee_apres_le_plan(double, serveur, cfg):
     pdf = double.pdf(absorbee, 'd.pdf', contenu=b'%PDF autre')
     b = double.bibliotheque()
     d.chercher(b, cfg)
-    plan, _ = d.planifier(cfg, serveur.client(), b, avec_surs=True)
+    accepter_surs(cfg, b)
+    plan, _ = d.planifier(cfg, serveur.client(), b)
     ops = {op.cle: op for op in plan.groupes[0].operations}
     assert ops[absorbee].enfants == [pdf]
     note = serveur.ajouter('note', parentItem=absorbee, note='<p>ajoutée ensuite</p>')

@@ -451,6 +451,43 @@ def _nfc(nom: str) -> str:
     return unicodedata.normalize('NFC', nom)
 
 
+def _formes(noms, a=None) -> str:
+    """Noms qui s'affichent pareil, distingués par leurs points de code (`ascii`), sous l'identifiant d'un tag
+    confidentiel quand l'analyse `a` est donnée."""
+    def une(n: str) -> str:
+        if a is not None and _affiche(a, n) != n:
+            return _affiche(a, n)
+        quelle = ', forme composée NFC' if n == _nfc(n) else (
+            ', forme décomposée NFD' if n == unicodedata.normalize('NFD', n) else '')
+        return f'« {n} » ({ascii(n)}{quelle})'
+    return ' ; '.join(une(n) for n in sorted(noms, key=ascii))
+
+
+def _indexer(paires) -> dict[str, dict[str, list]]:
+    """Objets (entrées ou groupes) désignés par chaque nom, rangés par forme NFC puis par nom exact."""
+    index: dict[str, dict[str, list]] = defaultdict(lambda: defaultdict(list))
+    for nom, o in paires:
+        liste = index[_nfc(nom)][nom]
+        if all(x is not o for x in liste):
+            liste.append(o)
+    return index
+
+
+def _designes(nom: str, index, chemin) -> list:
+    """Objets désignés par `nom`, sous sa forme exacte d'abord. Sinon sous sa forme NFC, l'agent pouvant taper une
+    autre forme que celle du fichier, à condition qu'elle ne désigne pas des objets différents sous plusieurs formes
+    Unicode, puisqu'elles s'affichent pareil et que juger l'une ne doit pas juger l'autre."""
+    formes = index.get(_nfc(nom), {})
+    if nom in formes:
+        return formes[nom]
+    objets = {id(o): o for liste in formes.values() for o in liste}
+    if len({frozenset(map(id, liste)) for liste in formes.values()}) > 1:
+        raise SystemExit(f'« {nom} » désigne plusieurs noms de {chemin} qui ne diffèrent que par leur forme Unicode '
+                         f'et s\'affichent pareil, {_formes(formes)}. Donner le nom sous sa forme exacte, copiée '
+                         'depuis le fichier.')
+    return list(objets.values())
+
+
 def _sort(v: str) -> str:
     if norm(v) not in SORTS:
         raise SystemExit(f'Sort inconnu « {v} ». Sorts possibles : {", ".join(SORTS.values())}.')
@@ -478,22 +515,18 @@ def decider(s: Suivi, cfg: Config, decision: str, noms=(), variantes=(), evident
         n += 1
 
     tous = {_nfc(e.nom) for e in s.tags} | {_nfc(x) for g in s.variantes for x in (g.cible, *g.noms)}
-    tags_a_juger: dict[str, list[Entree]] = defaultdict(list)
-    for e in s.tags:
-        if not e.decision:
-            tags_a_juger[_nfc(e.nom)].append(e)
-    groupes_a_juger: dict[str, list[Variantes]] = defaultdict(list)
-    for g in s.variantes:
-        if not g.decision:
-            for x in dict.fromkeys((g.cible, *g.noms)):
-                groupes_a_juger[_nfc(x)].append(g)
+    index_tags = _indexer((e.nom, e) for e in s.tags)
+    index_groupes = _indexer((x, g) for g in s.variantes for x in dict.fromkeys((g.cible, *g.noms)))
 
-    def refuser_inconnus(demandes, a_juger, quoi: str, autre=None, ailleurs: str = '') -> None:
-        inconnus = [x for x in demandes if _nfc(x) not in a_juger]
+    def a_juger(nom: str, index) -> list:
+        return [o for o in _designes(nom, index, chemin) if not o.decision]
+
+    def refuser_inconnus(demandes, index, quoi: str, autre=None, ailleurs: str = '') -> None:
+        inconnus = [x for x in demandes if not a_juger(x, index)]
         if not inconnus:
             return
         morceaux = []
-        if autre is not None and (mal_places := [x for x in inconnus if _nfc(x) in autre]):
+        if autre is not None and (mal_places := [x for x in inconnus if a_juger(x, autre)]):
             morceaux.append(f'«{"», «".join(f" {x} " for x in mal_places)}» désigne {ailleurs}.')
             inconnus = [x for x in inconnus if x not in mal_places]
         absents = '», «'.join(f' {x} ' for x in inconnus if _nfc(x) not in tous)
@@ -507,16 +540,17 @@ def decider(s: Suivi, cfg: Config, decision: str, noms=(), variantes=(), evident
                             'décision prise se change à la main dans le fichier.')
         raise SystemExit(' '.join(morceaux))
 
-    refuser_inconnus(noms, tags_a_juger, 'entrées [[tag]]', groupes_a_juger,
+    refuser_inconnus(noms, index_tags, 'entrées [[tag]]', index_groupes,
                      'un groupe [[variantes]] à juger, à donner après --variantes')
-    refuser_inconnus(variantes, groupes_a_juger, 'groupes [[variantes]]', tags_a_juger,
+    refuser_inconnus(variantes, index_groupes, 'groupes [[variantes]]', index_tags,
                      'une entrée [[tag]] à juger, à donner sans --variantes')
-    refuser_inconnus(sauf, dict.fromkeys(tous), 'noms de tags et de groupes')
+    # `sauf` écarte sous la forme NFC, toutes formes confondues, puisque trop écarter laisse seulement à juger.
+    refuser_inconnus([x for x in sauf if _nfc(x) not in tous], {}, 'noms de tags et de groupes')
     sort = _sort(sort) if sort else ''
 
     vus: set[int] = set()
     for nom in noms:
-        for e in tags_a_juger[_nfc(nom)]:
+        for e in a_juger(nom, index_tags):
             if id(e) in vus:
                 continue
             vus.add(id(e))
@@ -531,7 +565,7 @@ def decider(s: Suivi, cfg: Config, decision: str, noms=(), variantes=(), evident
             _verifier_cible(e.sort, e.cible, e.decision, e.nom, cfg, chemin)
             n += 1
     for nom in variantes:
-        for g in groupes_a_juger[_nfc(nom)]:
+        for g in a_juger(nom, index_groupes):
             if id(g) in vus:
                 continue
             vus.add(id(g))
@@ -563,23 +597,38 @@ def ajouter(s: Suivi, cfg: Config, b: Bibliotheque, noms, sort: str, cible: str 
     chemin = cfg.suivi / FICHIER
     a = _Analyse(b, cfg)
     sort = _sort(sort)
-    deja = {_nfc(e.nom) for e in s.tags}
+    deja = {e.nom for e in s.tags}
     for nom in noms:
-        if _nfc(nom) in deja:
+        # Nom réel porté dans la bibliothèque, qui peut avoir une autre forme Unicode que le nom tapé. Enregistrer le
+        # nom tapé donnerait une règle acceptée qui ne s'applique à rien.
+        reel = _reel(a, nom)
+        nom_suivi = _affiche(a, reel)  # identifiant pour un tag confidentiel, comme dans le fichier relu
+        if nom_suivi in deja:
             raise SystemExit(f'« {nom} » a déjà une entrée [[tag]] dans {chemin}. La juger avec `zc tags accepter` ou '
                              '`zc tags refuser`.')
-        reel = next((n for n in (a.reel(nom), a.reel(_nfc(nom))) if n in a.u), None)
-        if reel is None:
-            raise SystemExit(f'Aucun tag « {nom} » dans la bibliothèque. Vérifier le nom, en entier et entre '
-                             'guillemets.')
         e = a.stats(Entree(reel), a.u[reel])
-        e.nom, e.sort, e.cible, e.decision = nom, sort, cible, ACCEPTER
+        e.nom, e.sort, e.cible, e.decision = nom_suivi, sort, cible, ACCEPTER
         e.source = UTILISATEUR if utilisateur else AGENT
-        _verifier_cible(e.sort, e.cible, e.decision, nom, cfg, chemin)
+        _verifier_cible(e.sort, e.cible, e.decision, nom_suivi, cfg, chemin)
         s.tags.append(e)
-        deja.add(_nfc(nom))
+        deja.add(nom_suivi)
     s.tags.sort(key=lambda e: norm(e.nom))
     return len(noms)
+
+
+def _reel(a: '_Analyse', nom: str) -> str:
+    """Tag de la bibliothèque désigné par `nom` (ou par l'identifiant d'un tag confidentiel), sous sa forme exacte
+    d'abord, sinon sous sa forme NFC si un seul tag y correspond."""
+    if (n := a.reel(nom)) in a.u:
+        return n
+    formes = [n for n in a.u if _nfc(n) == _nfc(nom)]
+    if not formes:
+        raise SystemExit(f'Aucun tag « {nom} » dans la bibliothèque. Vérifier le nom, en entier et entre guillemets.')
+    if len(formes) > 1:
+        raise SystemExit(f'« {nom} » désigne plusieurs tags de la bibliothèque qui ne diffèrent que par leur forme '
+                         f'Unicode et s\'affichent pareil, {_formes(formes, a)}. Donner le nom sous sa forme exacte, '
+                         'copiée depuis le rapport de l\'inventaire ou depuis Zotero.')
+    return formes[0]
 
 
 # --- Analyse ----------------------------------------------------------------------

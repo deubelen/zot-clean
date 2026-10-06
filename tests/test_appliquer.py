@@ -322,3 +322,51 @@ def test_groupe_arrete_apres_une_partie_des_ecritures(serveur, cfg):
     bilan = appliquer(plan, ecrire(plan, cfg), serveur.client(), cfg, ESSAI)
     assert set(bilan.conflits) == {'1', '2'} and bilan.arretes == {'1': [a]}
     assert f"après l'écriture de {a}" in bilan.conflits['1']
+
+
+def test_cle_d_un_autre_compte_refusee_a_l_application(serveur, cfg, zotero):
+    """La clé doit être celle du compte que Zotero synchronise sur cet ordinateur. Un chercheur aux deux comptes
+    (personnel et institutionnel) qui crée sa clé sur l'autre écrirait sinon dans une autre bibliothèque."""
+    plan = plan_titres(serveur, 2)
+    chemin = ecrire(plan, cfg)
+    zotero.compte(9999, 'institution')
+    zotero.enregistrer()
+    with pytest.raises(Refus, match=r'synchronise le compte « institution » \(n° 9999\)'):
+        appliquer(plan, chemin, serveur.client(), cfg, ESSAI)
+    assert not [r for r in serveur.requetes if r[0] != 'GET'] and not cfg.journal.exists()
+    zotero.compte(serveur.utilisateur)
+    zotero.enregistrer()
+    assert appliquer(plan, chemin, serveur.client(), cfg, ESSAI).faits == ['0', '1']
+
+
+def test_cle_d_un_autre_compte_refusee_a_la_planification(serveur, cfg, zotero):
+    """`lire_a_jour`, par où passent toutes les planifications, refuse avant toute requête. Sans ce contrôle, les
+    changements récents de l'autre bibliothèque, plus avancée que la base locale, seraient reportés sur celle-ci."""
+    from zot_clean.appliquer import lire_a_jour
+    serveur.ajouter(title="Fiche de l'autre bibliothèque")
+    zotero.compte(9999)
+    zotero.enregistrer()
+    with pytest.raises(Refus, match='il modifierait donc une autre bibliothèque'):
+        lire_a_jour(cfg, serveur.client())
+    with pytest.raises(Refus, match='autre bibliothèque'):  # même pour une commande qui ne fait que lire
+        lire_a_jour(cfg, serveur.client(), facultatif=True)
+    assert serveur.requetes == []
+    zotero.compte(serveur.utilisateur)
+    zotero.enregistrer()
+    # Cas normal : les changements du serveur, plus avancé que la base locale, sont reportés.
+    assert "Fiche de l'autre bibliothèque" in {e.titre for e in lire_a_jour(cfg, serveur.client()).fiches}
+
+
+def test_base_jamais_synchronisee_refusee(serveur, cfg, zotero):
+    """Sans compte enregistré dans la base, rien ne dit quelle bibliothèque elle est, et Zotero ne recevrait pas
+    les écritures faites par zotero.org."""
+    from zot_clean.appliquer import lire_a_jour
+    plan = plan_titres(serveur, 1)
+    chemin = ecrire(plan, cfg)
+    zotero.compte(None)
+    zotero.enregistrer()
+    for essai in (lambda: lire_a_jour(cfg, serveur.client()),
+                  lambda: appliquer(plan, chemin, serveur.client(), cfg, ESSAI)):
+        with pytest.raises(Refus, match="jamais synchronisé.*Réglages › Synchronisation"):
+            essai()
+    assert serveur.requetes == []
