@@ -144,7 +144,7 @@ def test_copie_refaite_si_zotero_ecrit_pendant(zotero, tmp_path, monkeypatch):
         copies.append(source)
         copier(source, cible)
         if len(copies) <= ecritures:
-            os.utime(base, ns=(1, 10 ** 18 + len(copies)))
+            os.utime(base, (1, 10 ** 9 + 10 * len(copies)))  # en secondes : Windows date au dixième de µs
     monkeypatch.setattr(lecture.shutil, 'copy2', copie_pendant_une_ecriture)
     ecritures = 1
     (tmp_path / 'a').mkdir()
