@@ -73,8 +73,9 @@ VALUES: dict[tuple[str, str], dict[str, str]] = {
     ('cles decider', 'decisions'): {'garder': 'keep', 'écarter': 'skip', 'natif': 'native', 'extra': 'extra'},
 }
 
-# Appeared with version 0.4.0, with no old name.
-NEW_COMMANDS = ('config show', 'init --library-language')
+# Appeared with version 0.4.0 or later, with no old name.
+NEW_COMMANDS = ('config show', 'init --library-language', 'subjects accept', 'subjects reject', 'subjects --add',
+                'subjects --from', 'subjects --note')
 
 
 def _form(word: str) -> str:

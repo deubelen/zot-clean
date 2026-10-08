@@ -233,12 +233,13 @@ Do back up your working folder, however. Its journals make it possible to undo a
 ## Updating zot-clean
 
 ```
-uv tool upgrade zot-clean
+uv tool install --reinstall git+https://github.com/deubelen/zot-clean
+zc --version
 cd ~/Zotero-work
 zc init --update
 ```
 
-The second command replaces the agent's instructions and the step guides with those of the new version. It touches neither `config.toml`, nor `.env`, nor your decisions, reports and journals. Since version 0.4, the commands and the step guides have English names (the command for duplicates is now called `zc duplicates`, and its guide `duplicates`…). The update removes the old step guides, and `zc` answers an old command name by giving the new one. The names of the classification, the reports and the messages stay in the language of the library.
+The first command fetches the latest version from GitHub (`uv tool upgrade zot-clean` does not see it, since the tool comes from a Git repository and not from a package index), and `zc --version` shows the installed number. `zc init --update` replaces the agent's instructions and the step guides with those of the new version. It touches neither `config.toml`, nor `.env`, nor your decisions, reports and journals. Since version 0.4, the commands and the step guides have English names (the command for duplicates is now called `zc duplicates`, and its guide `duplicates`…). The update removes the old step guides, and `zc` answers an old command name by giving the new one. The names of the classification, the reports and the messages stay in the language of the library.
 
 ## When zc refuses
 

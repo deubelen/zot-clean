@@ -266,7 +266,7 @@ def test_pending_creates_the_decisions_file(world, cfg):
     example = text.split('# [[fiche]]', 1)[1]
     (cfg.tracking / r.FILE).write_text('[[fiche]]' + example.replace('\n# ', '\n'), encoding='utf-8')
     assert [(x.key, x.action, x.target) for x in r.load(cfg)] == [('ABCD2345', r.MOVE, 'Psychologie/Perception')]
-    assert 'Paquet 2 · sans place dans le fonds (depuis = "")' in report
+    assert '## Paquet 2 · sans place dans le fonds\n' in report and 'zc subjects accept CLÉ=CHEMIN' in report
     assert 'Une vieille chose · Article de revue · aussi dans Vieux\n' in report
     assert 'Sans collection · Article de revue · hors de toute collection' in report
 
@@ -417,6 +417,18 @@ def test_split_collection_reviewed_to_trash(world, cfg, server):
     lib.item('Arrivée après examen', misc)
     plan, _ = r.make_plan(lib.read(), cfg, server.client())
     assert misc not in ops_by_key(plan)
+
+
+def test_reviewed_collection_already_trashed(world, cfg, server):
+    """A collection to distribute emptied and trashed by a pass: `--reviewed` says there is nothing left to mark,
+    rather than that it is not a collection to distribute (skills audit, D246)."""
+    lib, k, items, _ = world
+    misc = lib.collection('Divers')
+    b = lib.read()
+    _misc(lib, cfg, b, ['Arts'])
+    b.collections = {cid: c for cid, c in b.collections.items() if c.key != misc}
+    with pytest.raises(SystemExit, match='corbeille'):
+        r.mark_reviewed(b, cfg, [misc])
 
 
 
@@ -657,3 +669,101 @@ def test_paths_of_the_report_after_the_plan(zotero, server, cfg):
     # A moved collection leaves its current place: Arts goes from Beaux-arts, as it is now, to 40 Fonds.
     assert 'déplacée de Beaux-arts vers 40 Fonds' in report
     assert 'les thèmes étant sous « 40 Fonds »' in report
+
+
+def _entries(cfg, key):
+    return [(x.action, x.target, x.origin, x.source, x.decision) for x in r.load(cfg) if x.key == key]
+
+
+def test_accept_deduces_action_and_collection_left(world, cfg, server):
+    """D245: `zc subjects accept KEY=PATH` finds « déplacer » or « ajouter » and `depuis` by the rule of the
+    reports: the Inbox, then the first collection to distribute, then the only theme, otherwise added."""
+    lib, k, items, _ = world
+    new = lib.item('Nouvelle fiche', k['Inbox'])
+    twice = lib.item('Deux thèmes', k['Emotions'], k['Musees'])
+    b = lib.read()
+    w = r.accept(b, cfg, [f'{new}=Psychologie/Émotion', f'{items["peur"]}=40 Fonds/Arts', f'{items["vieux"]}=Arts',
+                          f'{items["ancien"]}= Psychologie / Perception ', items['gibson']])
+    assert w.accepted == 5 and not w.replaced
+    assert _entries(cfg, new) == [(r.MOVE, 'Psychologie/Émotion', k['Inbox'], r.AGENT, r.ACCEPT)]
+    assert _entries(cfg, items['peur']) == [(r.MOVE, 'Arts', k['Emotions'], r.AGENT, r.ACCEPT)]
+    assert _entries(cfg, items['vieux']) == [(r.ADD, 'Arts', '', r.AGENT, r.ACCEPT)]
+    assert _entries(cfg, items['ancien']) == [(r.ADD, 'Psychologie/Perception', '', r.AGENT, r.ACCEPT)]
+    # KEY alone accepts the proposal already written, with its own target and collection left.
+    assert _entries(cfg, items['gibson']) == [(r.MOVE, 'Psychologie/Perception/Apprentissage perceptif', '',
+                                               r.AGENT, r.ACCEPT)]
+    with pytest.raises(SystemExit, match='plusieurs thèmes'):
+        r.accept(b, cfg, [f'{twice}=Psychologie/Perception'])
+    r.accept(b, cfg, [f'{twice}=Psychologie/Perception'], origin=k['Musees'], user=True, note='Demandé.')
+    assert _entries(cfg, twice) == [(r.MOVE, 'Psychologie/Perception', k['Musees'], r.INSTRUCTION, r.ACCEPT)]
+    # Already in the collection that will embody the path (« Émotions » renamed « Émotion »): nothing written.
+    w = r.accept(b, cfg, [f'{twice}=Psychologie/Émotion'], add=True)
+    assert w.accepted == 0 and 'déjà dans' in w.notices[0]
+
+
+def test_accept_replaces_adds_and_trashes(world, cfg, server):
+    """D245: a new place replaces the earlier decision of the item, --add writes a second one, --trash takes keys
+    alone."""
+    lib, k, items, b = world
+    voir = items['voir']
+    w = r.accept(b, cfg, [f'{voir}=Arts'])
+    assert w.replaced == [f'{voir} : Psychologie/Perception/Apprentissage perceptif → Arts']
+    assert [t for _, t, *_ in _entries(cfg, voir)] == ['Arts']
+    r.accept(b, cfg, [f'{voir}=Psychologie/Émotion'], add=True)
+    assert [(a_, t) for a_, t, *_ in _entries(cfg, voir)] == [(r.MOVE, 'Arts'), (r.ADD, 'Psychologie/Émotion')]
+    w = r.accept(b, cfg, [f'{voir}=Arts'])
+    assert w.accepted == 0 and 'inchangée' in w.notices[0]
+    r.accept(b, cfg, [items['vieux']], trash=True)
+    assert _entries(cfg, items['vieux']) == [(r.TRASH, '', '', r.AGENT, r.ACCEPT)]
+    with pytest.raises(SystemExit, match='clé seule'):
+        r.accept(b, cfg, [f'{items["vieux"]}=Arts'], trash=True)
+
+
+def test_accept_and_reject_refusals(world, cfg, server):
+    """D245: everything is checked before anything is written."""
+    lib, k, items, b = world
+    before = (cfg.tracking / r.FILE).read_text(encoding='utf-8')
+    with pytest.raises(SystemExit, match='Psychologie/Émotion'):  # closest path cited
+        r.accept(b, cfg, [f'{items["peur"]}=Arts', f'{items["vieux"]}=Psychologie/Emotions'])
+    with pytest.raises(SystemExit, match='Aucune fiche de clé ZZZZ2222'):
+        r.accept(b, cfg, ['ZZZZ2222=Arts'])
+    with pytest.raises(SystemExit, match='Aucune proposition à accepter'):
+        r.accept(b, cfg, [items['peur']])
+    with pytest.raises(SystemExit, match="n'est pas une collection"):
+        r.accept(b, cfg, [f'{items["peur"]}=Arts'], origin=k['Arts'])
+    with pytest.raises(SystemExit, match='Aucune décision ni proposition à refuser'):
+        r.reject(b, cfg, [items['gibson'], items['peur']])
+    assert (cfg.tracking / r.FILE).read_text(encoding='utf-8') == before
+    assert r.reject(b, cfg, [items['gibson']]).rejected == 1
+    assert _entries(cfg, items['gibson'])[0][-1] == r.REJECT
+
+
+def test_accept_and_reject_commands(world, cfg, server, monkeypatch, capsys):
+    from zot_clean.cli import main
+    lib, k, items, b = world
+    (cfg.workspace / 'config.toml').write_text(
+        f'[zotero]\ndossier = "{cfg.zotero_dir.as_posix()}"\n[methode]\nlangue = "en"\nfonds = "40 Fonds"\n'
+        'archives = "80 Archives"\nprojets = ["20 Cours"]\n', encoding='utf-8')
+    folder = ['--workspace', str(cfg.workspace)]
+    assert main(['subjects', 'accept', f'{items["peur"]}=Arts', f'{items["voir"]}=Arts', '--user',
+                 '--note', 'Asked by the user.', *folder]) == 0
+    out = capsys.readouterr().out
+    assert f'{items["voir"]}: Psychologie/Perception/Apprentissage perceptif → Arts' in out
+    assert '2 decisions accepted, of which 1 replacing an earlier place' in out and '`zc subjects plan`' in out
+    assert _entries(cfg, items['peur'])[0][3] == r.INSTRUCTION
+    assert main(['subjects', 'reject', items['gibson'], *folder]) == 0
+    assert '1 decision rejected' in capsys.readouterr().out
+    assert main(['subjects', 'accept', f'{items["peur"]}=Nowhere', *folder]) == 1
+    assert 'is not a path of plan.md' in capsys.readouterr().err
+
+
+def test_item_trashed_by_decision_not_reported(world, cfg, server):
+    """D245, bench pilot: an item sent to the trash by its accepted decision is not reported as missing."""
+    lib, k, items, b = world
+    for name in ('manuel', 'peur'):
+        del b.all_items[next(i for i, e in b.all_items.items() if e.key == items[name])]
+    entries = r.load(cfg) + [r.Entry(items['peur'], r.MOVE, 'Arts', decision=r.ACCEPT)]
+    outline = f.read_outline((cfg.workspace / f.OUTLINE).read_text(encoding='utf-8'), cfg)
+    v = r.compute_target(b, cfg, outline, f.load_tracking(cfg), entries)
+    assert not any(items['manuel'] in p for p in v.problems)
+    assert any(items['peur'] in p for p in v.problems)

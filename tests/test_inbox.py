@@ -122,10 +122,10 @@ def test_sorting_end_to_end(world, cfg, server, fake, zotero):
     assert "2 dans l'Inbox et 1 sans place dans le fonds" in report
     assert f"{items['ancienne']} / {items['double']}" in report or f"{items['double']} / {items['ancienne']}" in report
     assert 'thèmes voisins, même auteur : Psychologie/Perception (1)' in report
-    assert f'depuis = "{k["Inbox"]}"' in report and 'action « ajouter »' in report
+    assert 'zc subjects accept CLÉ=CHEMIN' in report and 'depuis' not in report
     # Pilot rehearsal: situation of the references outside the Inbox, absence of a neighboring theme stated.
     assert 'dont 0 hors de toute collection, 1 dans un projet.' in report
-    assert 'action « ajouter », sans depuis, reste dans son projet' in report
+    assert ' · reste dans son projet' in report
     assert (cfg.tracking / r.FILE).read_text(encoding='utf-8').startswith(r.header())
 
     # Judgment: merge of the duplicate, filing of the new one and of the project one.
@@ -167,7 +167,7 @@ def test_reference_outside_any_collection(world, cfg, server, fake, zotero):
     report, _ = i.prepare(b, cfg, services(cfg, fake), server.client(), schema)
     assert 'dont 1 hors de toute collection, 1 dans un projet.' in report
     line = report.split(f'- {free} · ', 1)[1]
-    assert 'dans aucune collection · action « ajouter », sans depuis\n  - aucun thème voisin trouvé' in line
+    assert 'dans aucune collection\n  - aucun thème voisin trouvé' in line
     _, report = i.make_plan(b, cfg, services(cfg, fake), server.client(), schema)
     assert 'sans place dans le fonds, sans décision de rangement acceptée' in report and free in report
     # Seen and left outside the subject collections by decision (D176), it is no longer presented, only counted.
@@ -352,7 +352,7 @@ def test_texts_in_english(world, cfg, server, fake, zotero):
         report, listing = i.prepare(b, cfg, services(cfg, fake), server.client(), schema)
         assert '# Inbox sorting' in report and '2 in the Inbox and 1 without a place in the subjects' in report
         assert 'neighbouring themes, same author: Psychologie/Perception (1)' in report
-        assert 'action “ajouter”, without depuis' in report and '**Duplicates.**' in report
+        assert 'zc subjects accept KEY=PATH' in report and '**Duplicates.**' in report
         plan, plan_report = i.make_plan(b, cfg, services(cfg, fake), server.client(), schema)
         assert '# Inbox sorting' in plan_report and 'item(s) to modify' not in plan_report
         assert 'to modify in' in plan_report

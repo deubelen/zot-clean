@@ -23,6 +23,7 @@ trash, the items to trash, then the roots (D112), which are renamed only on
 request.
 """
 
+import difflib
 import json
 import re
 import secrets
@@ -51,8 +52,9 @@ BUNDLE = 50
 def header() -> str:
     return L(en="""\
 # Item-by-item filing decisions, read by `zc subjects plan` and `zc inbox plan`.
-# This file can be read and edited by hand or with the agent. `zc subjects pending` adds to it the proposals drawn
-# from the tags linked to a theme, without touching the existing entries.
+# The decisions are written with `zc subjects accept KEY=PATH` (which finds `action` and `depuis` by itself) and
+# `zc subjects reject KEY`. `zc subjects pending` adds the proposals drawn from the tags linked to a theme, without
+# touching the existing entries. The file can still be read and edited by hand.
 #
 # One [[fiche]] table per decision, usually a single one per item (a second one to "ajouter" another place).
 # cle      : key of the item, given by the reports (`zc subjects pending`, `zc inbox prepare`).
@@ -77,8 +79,9 @@ def header() -> str:
 # note = "Colour psychophysics, in the Includes of Perception."
 """, fr="""\
 # Décisions de rangement fiche par fiche, lues par `zc subjects plan` et `zc inbox plan`.
-# Ce fichier se relit et se modifie à la main ou avec l'agent. `zc subjects pending` y ajoute les propositions
-# tirées des tags reliés à un thème, sans toucher aux entrées existantes.
+# Les décisions s'écrivent avec `zc subjects accept CLÉ=CHEMIN` (qui trouve seul `action` et `depuis`) et
+# `zc subjects reject CLÉ`. `zc subjects pending` y ajoute les propositions tirées des tags reliés à un thème, sans
+# toucher aux entrées existantes. Le fichier se relit et se modifie encore à la main.
 #
 # Une table [[fiche]] par décision, une seule par fiche en général (une seconde pour « ajouter » une autre place).
 # cle      : clé de la fiche, donnée par les rapports (`zc subjects pending`, `zc inbox prepare`).
@@ -383,6 +386,8 @@ def compute_target(b: Library, cfg: Config, plan: f.Outline, tracking: f.Trackin
         if ent.decision != ACCEPT:
             continue
         if ent.key not in all_items:
+            if ent.action == TRASH:  # sent to the trash as decided (bench pilot, D245): nothing to say
+                continue
             v.problems.append(L(en=f'rangement.toml: the item {ent.key} no longer exists, entry ignored.',
                                 fr=f'rangement.toml : la fiche {ent.key} n\'existe plus, entrée ignorée.'))
             continue
@@ -769,7 +774,10 @@ def mark_reviewed(b: Library, cfg: Config, keys: list[str]) -> dict[str, int]:
     to_distribute = {a.key for a in tracking.collections if a.action == f.DISTRIBUTE}
     e = _State(b)
     for k in keys:
-        if k not in to_distribute or k not in e.name:
+        if k in to_distribute and k not in e.name:  # emptied by a pass and trashed (skills audit, D246)
+            raise SystemExit(L(en=f'{k} is no longer in the library (trash), there is nothing left to mark.',
+                               fr=f'{k} n\'est plus dans la bibliothèque (corbeille), il n\'y a plus rien à marquer.'))
+        if k not in to_distribute:
             raise SystemExit(L(en=f'{k} is not a collection to distribute in suivi/fonds.toml.',
                                fr=f'{k} n\'est pas une collection à répartir de suivi/fonds.toml.'))
     content = {k: {el.key for el in b.all_items.values() if el.is_item and any(e.key[c] == k for c in el.collections)}
@@ -838,10 +846,10 @@ def leave_out(b: Library, cfg: Config, keys: list[str]) -> list[str]:
             raise SystemExit(L(en=f'{k} already has its place in the subjects.',
                                fr=f'{k} a déjà sa place dans le fonds.'))
         if k in decided:
-            raise SystemExit(L(en=f'{k} has a pending or accepted decision in suivi/{FILE}. Set it to "refuser" '
-                                  'before leaving the item out of the subjects.',
-                               fr=f'{k} a une décision en attente ou acceptée dans suivi/{FILE}. La passer à '
-                                  '« refuser » avant de laisser la fiche hors du fonds.'))
+            raise SystemExit(L(en=f'{k} has a pending or accepted decision in suivi/{FILE}. Reject it with '
+                                  f'`zc subjects reject {k}` before leaving the item out of the subjects.',
+                               fr=f'{k} a une décision en attente ou acceptée dans suivi/{FILE}. La refuser avec '
+                                  f'`zc subjects reject {k}` avant de laisser la fiche hors du fonds.'))
     try:
         raw = json.loads((cfg.tracking / LEFT_OUT).read_text(encoding='utf-8'))
     except FileNotFoundError:
@@ -852,6 +860,158 @@ def leave_out(b: Library, cfg: Config, keys: list[str]) -> list[str]:
     (cfg.tracking / LEFT_OUT).write_text(json.dumps(raw, ensure_ascii=False, indent=1, sort_keys=True),
                                       encoding='utf-8')
     return sorted(keys)
+
+
+# --- Decisions written by command (D245) ------------------------------------------
+
+@dataclass
+class Written:
+    """What `zc subjects accept` or `reject` has just written, for the command line."""
+    accepted: int = 0
+    rejected: int = 0
+    replaced: list[str] = field(default_factory=list)
+    notices: list[str] = field(default_factory=list)
+
+
+def _deduced(b: Library, cfg: Config, tracking: f.Tracking, e: _State, el: Item) -> tuple[str, str]:
+    """Action and collection left by an item that receives a place, by the rule of the reports (D245): the Inbox,
+    otherwise its first collection to distribute in the order of suivi/fonds.toml, otherwise its only theme. An item
+    only in a project, in the archives or in no collection keeps them and is added."""
+    m = cfg.method
+    inside = sorted(e.key[c] for c in el.collections)
+    inbox = e.root(m.inbox) if m.inbox else None
+    if inbox and (k := next((c for c in inside if e.under(c, inbox)), None)):
+        return MOVE, k
+    for a in tracking.collections:
+        if a.action == f.DISTRIBUTE and a.key in inside:
+            return MOVE, a.key
+    subjects = e.root(m.subjects) if m.subjects else None
+    themes = {a.key for a in tracking.collections if a.action == f.THEME}
+    current = [c for c in inside if c in themes or (subjects and c != subjects and e.under(c, subjects))]
+    if len(current) > 1:
+        listed = ', '.join(f'{c} ({e.path(c)})' for c in current)
+        raise SystemExit(L(en=f'{el.key} is in several themes ({listed}). Give the one it leaves with --from, or '
+                              'keep them all with --add.',
+                           fr=f'{el.key} est dans plusieurs thèmes ({listed}). Donner celui qu\'elle quitte avec '
+                              '--from, ou les garder tous avec --add.'))
+    return (MOVE, current[0]) if current else (ADD, '')
+
+
+def _outline_path(text: str, outline: f.Outline, cfg: Config) -> str:
+    """Path of the outline designated by `text`, with or without the subjects root, or a refusal that cites the
+    closest paths."""
+    path = '/'.join(x.strip() for x in text.strip().strip('/').split('/'))
+    root = cfg.method.subjects
+    if root and path.startswith(root + '/'):
+        path = path[len(root) + 1:]
+    if path in outline.nodes:
+        return path
+    close = difflib.get_close_matches(path, list(outline.nodes), n=3, cutoff=0.5)
+    hint = (L(en=' Closest paths: ', fr=' Chemins les plus proches : ') + ', '.join(f'“{c}”' for c in close)
+            + '.') if close else ''
+    raise SystemExit(L(en=f'“{path}” is not a path of {f.OUTLINE}.{hint}',
+                       fr=f'« {path} » n\'est pas un chemin de {f.OUTLINE}.{hint}'))
+
+
+def accept(b: Library, cfg: Config, keys: list[str], add: bool = False, trash: bool = False, origin: str = '',
+           user: bool = False, note: str = '') -> Written:
+    """`zc subjects accept` (D245). KEY=PATH writes an accepted decision, KEY alone accepts the proposals already
+    written for the item (those drawn from the tags), KEY with `trash` sends the item to the trash. Everything is
+    checked before anything is written."""
+    outline = f.read_outline((cfg.workspace / f.OUTLINE).read_text(encoding='utf-8'), cfg)
+    tracking = f.load_tracking(cfg)
+    entries = load(cfg)
+    e = _State(b)
+    by_key = b.by_key()
+    v = compute_target(b, cfg, outline, tracking, entries)
+    source = INSTRUCTION if user else AGENT
+    w = Written()
+    planned: list[tuple[str, str]] = []
+    for text in keys:
+        key, _, path = text.partition('=')
+        key = key.strip().upper()
+        el = by_key.get(key)
+        if el is None or not el.is_item:
+            raise SystemExit(L(en=f'No item with key {key} outside the trash (an attachment or a note designates '
+                                  'nothing here).',
+                               fr=f'Aucune fiche de clé {key} hors de la corbeille (une pièce jointe ou une note ne '
+                                  'désigne rien ici).'))
+        if trash and path:
+            raise SystemExit(L(en=f'“{text}”: with --trash, give the key alone.',
+                               fr=f'« {text} » : avec --trash, donner la clé seule.'))
+        if path:
+            path = _outline_path(path, outline, cfg)
+        elif not trash and not any(x.key == key and not x.decision for x in entries):
+            raise SystemExit(L(en=f'No proposal to accept for {key}. Write KEY=PATH (path in {f.OUTLINE}), or '
+                                  '--trash.',
+                               fr=f'Aucune proposition à accepter pour {key}. Écrire CLÉ=CHEMIN (chemin de '
+                                  f'{f.OUTLINE}), ou --trash.'))
+        if origin and origin not in {e.key[c] for c in el.collections}:
+            raise SystemExit(L(en=f'{origin} is not a collection of {key}.',
+                               fr=f'{origin} n\'est pas une collection de {key}.'))
+        planned.append((key, path))
+    for key, path in planned:
+        el = by_key[key]
+        mine = [x for x in entries if x.key == key]
+        if not path and not trash:  # proposals already written
+            for x in mine:
+                if not x.decision:
+                    x.decision = ACCEPT
+                    x.source = INSTRUCTION if user else x.source
+                    x.note = note or x.note
+                    w.accepted += 1
+            continue
+        if trash:
+            action, left = TRASH, ''
+        elif add:
+            action, left = ADD, ''
+        elif origin:
+            action, left = MOVE, origin
+        else:
+            action, left = _deduced(b, cfg, tracking, e, el)
+        # The collection that embodies the path once the outline applied, whatever its current name (D113, D117).
+        node = None if trash else v.nodes.get(path)
+        inside = {v.merges.get(k, k) for k in (e.key[c] for c in el.collections)}
+        if node and (v.merges.get(left, left) == node or (action == ADD and node in inside)):
+            w.notices.append(L(en=f'{key} is already in “{path}”, no decision written.',
+                               fr=f'{key} est déjà dans « {path} », aucune décision écrite.'))
+            continue
+        same = [x for x in mine if x.action == action and x.target == path and x.origin == left]
+        if same and all(x.decision == ACCEPT for x in same):
+            w.notices.append(L(en=f'{key}: decision already accepted, unchanged.',
+                               fr=f'{key} : décision déjà acceptée, inchangée.'))
+            continue
+        # D245: a new place replaces the earlier decisions of the item, unless it is a second place (--add).
+        dropped = [x for x in mine if (x.target == path or not add)]
+        for x in dropped:
+            entries.remove(x)
+        trash_word = L(en='trash', fr='corbeille')
+        before = ', '.join(dict.fromkeys(x.target or trash_word for x in dropped
+                                         if x.decision != REJECT and (x.target, x.action) != (path, action)))
+        if before:
+            after = path or trash_word
+            w.replaced.append(L(en=f'{key}: {before} → {after}', fr=f'{key} : {before} → {after}'))
+        entries.append(Entry(key, action, path, left, source, ACCEPT, note))
+        w.accepted += 1
+    write(cfg, entries, b, privacy.excluded_items(b, cfg))
+    return w
+
+
+def reject(b: Library, cfg: Config, keys: list[str]) -> Written:
+    """`zc subjects reject` (D245): the proposals and decisions of these items are set to "refuser". A rejected
+    item is no longer proposed from its tags. To leave it outside the subjects, `zc subjects pending --leave-out`."""
+    entries = load(cfg)
+    w = Written()
+    for key in [k.strip().upper() for k in keys]:
+        mine = [x for x in entries if x.key == key and x.decision != REJECT]
+        if not mine:
+            raise SystemExit(L(en=f'No decision or proposal to reject for {key} in suivi/{FILE}.',
+                               fr=f'Aucune décision ni proposition à refuser pour {key} dans suivi/{FILE}.'))
+        for x in mine:
+            x.decision = REJECT
+            w.rejected += 1
+    write(cfg, entries, b, privacy.excluded_items(b, cfg))
+    return w
 
 
 @dataclass
@@ -938,17 +1098,15 @@ def _pending_report(bundles: list[Bundle], outline: f.Outline, additions: list[E
                   f'distribute, whether or not they already have a place in the subjects, and {n_without} in no '
                   'theme of the subjects, without those already decided in `suivi/rangement.toml` or those excluded '
                   'by the privacy filter. For each item, propose a target among the candidates, or leave it in '
-                  'place. Write the proposals in `suivi/rangement.toml` (one `[[fiche]]` table per item, as in the '
-                  'example of the header, with `depuis` = the key given for the bundle), then have them approved '
-                  'bundle by bundle. An item appears in a single bundle only, that of its first collection to '
+                  'place. Have the proposals approved bundle by bundle, then write them with `zc subjects accept '
+                  'KEY=PATH …`, which finds by itself the collection the item leaves. An item appears in a single bundle only, that of its first collection to '
                   'distribute in the order of `suivi/fonds.toml`, its other collections being given on its line.',
                fr=f'{n_total} en {n_bundles} de {BUNDLE} au plus, à savoir {n_distributed} des collections à '
                   f'répartir, qu\'elles aient déjà ou non une place dans le fonds, et {n_without} dans aucun thème '
                   'du fonds, sans celles déjà décidées dans `suivi/rangement.toml` ni celles exclues par le filtre '
                   'de confidentialité. Pour chaque fiche, proposer une cible parmi les candidats, ou la laisser en '
-                  'place. Écrire les propositions dans `suivi/rangement.toml` (une table `[[fiche]]` par fiche, '
-                  "comme dans l'exemple de l'en-tête, avec `depuis` = la clé donnée pour le paquet), puis les faire "
-                  "approuver paquet par paquet. Une fiche n'apparaît que dans un seul paquet, celui de sa première "
+                  'place. Faire approuver les propositions paquet par paquet, puis les écrire avec `zc subjects '
+                  "accept CLÉ=CHEMIN …`, qui trouve seul la collection que la fiche quitte. Une fiche n'apparaît que dans un seul paquet, celui de sa première "
                   'collection à répartir dans l\'ordre de `suivi/fonds.toml`, ses autres collections étant données '
                   'sur sa ligne.')]
     if left_out:
@@ -958,21 +1116,19 @@ def _pending_report(bundles: list[Bundle], outline: f.Outline, additions: list[E
                            f'présentées tant que leurs collections ne changent pas, {left_out}.')]
     if additions:
         lines += ['', L(en=f'{len(additions)} proposal(s) drawn from the tags linked to a theme were added to '
-                           '`suivi/rangement.toml`, to approve like the others (items marked "tag" below).',
+                           '`suivi/rangement.toml`, to approve like the others (items marked "tag" below), with `zc subjects '
+                           'accept KEY` or `zc subjects reject KEY`.',
                         fr=f'{len(additions)} proposition(s) tirée(s) des tags reliés à un thème ont été ajoutées à '
                            '`suivi/rangement.toml`, à approuver comme les autres (fiches marquées « tag » '
-                           'ci-dessous).')]
+                           'ci-dessous), avec `zc subjects accept CLÉ` ou `zc subjects reject CLÉ`.')]
     proposed_keys = {x.key: x.target for x in additions}
     for n, p in enumerate(bundles, 1):
         lines += ['', L(en=f'## Bundle {n} · {p.source}', fr=f'## Paquet {n} · {p.source}')
-                  + (f' (depuis = "{p.origin}")' if p.origin else ' (depuis = "")'), '']
+                  + (f' ({p.origin})' if p.origin else ''), '']
         if not p.origin:
-            lines += [L(en='`depuis` stays empty. For an item in no collection, "déplacer" or "ajouter" come to the '
-                           'same. An item filed outside the subjects (project, archives) gets "ajouter" and stays '
-                           'there.',
-                        fr='`depuis` reste vide. Pour une fiche hors de toute collection, « déplacer » ou « ajouter » '
-                           'reviennent au même. Une fiche rangée hors du fonds (projet, archives) reçoit « ajouter » '
-                           'et y reste.'), '']
+            lines += [L(en='An item filed outside the subjects (project, archives) stays there, its theme is added.',
+                        fr='Une fiche rangée hors du fonds (projet, archives) y reste, son thème lui est ajouté.'),
+                      '']
         lines += [L(en='Candidates:', fr='Candidats :'), '']
         for c in p.candidates:
             nd = outline.nodes.get(c)

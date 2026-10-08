@@ -68,7 +68,7 @@ The installation is done from GitHub.
 uv tool install git+https://github.com/deubelen/zot-clean
 ```
 
-To update the tool, run `uv tool upgrade zot-clean`, then `zc init --update` in the working folder. This second command replaces the agent's instructions, the guide and the method with those of the new version, without touching the configuration or the decisions already made.
+To update the tool, run `uv tool install --reinstall git+https://github.com/deubelen/zot-clean` (`uv tool upgrade zot-clean` does not see a new version of a tool installed from a Git repository), then `zc init --update` in the working folder. This second command replaces the agent's instructions, the guide and the method with those of the new version, without touching the configuration or the decisions already made.
 
 ## First steps
 

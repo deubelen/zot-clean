@@ -231,12 +231,13 @@ Sauvegardez en revanche votre dossier de travail. Ses journaux permettent d'annu
 ## Mettre à jour zot-clean
 
 ```
-uv tool upgrade zot-clean
+uv tool install --reinstall git+https://github.com/deubelen/zot-clean
+zc --version
 cd ~/Zotero-travail
 zc init --update
 ```
 
-La seconde commande remplace les consignes de l'agent et les guides des étapes par ceux de la nouvelle version. Elle ne touche ni à `config.toml`, ni à `.env`, ni à vos décisions, rapports et journaux. Depuis la version 0.4, les commandes et les guides d'étapes portent des noms anglais (la commande des doublons s'appelle maintenant `zc duplicates`, et son guide `duplicates`…). La mise à jour retire les anciens guides d'étapes, et `zc` répond à un ancien nom de commande en donnant le nouveau. Les noms du classement, les rapports et les messages restent dans la langue de la bibliothèque.
+La première commande va chercher la dernière version sur GitHub (`uv tool upgrade zot-clean` ne la voit pas, puisque l'outil vient d'un dépôt Git et non d'un index de paquets), et `zc --version` affiche le numéro installé. `zc init --update` remplace les consignes de l'agent et les guides des étapes par ceux de la nouvelle version. Elle ne touche ni à `config.toml`, ni à `.env`, ni à vos décisions, rapports et journaux. Depuis la version 0.4, les commandes et les guides d'étapes portent des noms anglais (la commande des doublons s'appelle maintenant `zc duplicates`, et son guide `duplicates`…). La mise à jour retire les anciens guides d'étapes, et `zc` répond à un ancien nom de commande en donnant le nouveau. Les noms du classement, les rapports et les messages restent dans la langue de la bibliothèque.
 
 ## Quand zc refuse
 

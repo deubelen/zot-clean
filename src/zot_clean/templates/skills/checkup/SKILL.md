@@ -25,7 +25,7 @@ The checkup lives in `zc audit`. Each audit keeps a snapshot of its points, and 
 5. **Themes that are too big.** A theme that exceeds the threshold of `config.toml` (`seuil_sous_theme`) is reported as information. If the user wants to split it, run `zc subjects titles <path>` and read all the titles.
    - Propose a split only if it is clear, that is if two to five sub-themes emerge by themselves, each with a definition that makes it possible to file a new reference without hesitation. Otherwise, tell the user that the theme can stay as it is.
    - Present the sub-themes and their definition. After agreement, write them in `plan.md`, then `zc subjects validate` and `zc subjects validate --save`.
-   - Propose the place of each reference, in one block for those that are obvious, in bundles of at most 10 for the others. Write the accepted decisions in `suivi/rangement.toml` (`action = "déplacer"`, `cible` = path of the sub-theme, `depuis` = key of the collection of the theme, given by the titles report, `source = "agent"`, `decision = "accepter"`). A reference that stays in the theme itself has no entry.
+   - Propose the place of each reference, in one block for those that are obvious, in bundles of at most 10 for the others. Write the accepted decisions with `zc subjects accept <key>=<path of the sub-theme> …`, without touching the file. A reference that stays in the theme itself has no decision.
    - Run `zc subjects plan`, summarize the plan, and after agreement apply it as in step 5 of the cleanup (trial, check with `zc show`, then `--all`).
 
    Done when the user has decided for each theme reported, split or left as it is.

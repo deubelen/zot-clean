@@ -27,7 +27,7 @@ In this file, the words stored are French in every library. A group is graded `s
 
 4. **Plan.** Run `zc duplicates plan`. Read the `.md` report indicated and summarize it to the user, that is the number of groups, the groups set aside and why, the « different values » where the kept item wins, and the related items (« Related », « Connexe » in a French library) whose link passes to the kept item. If the report begins with a warning about PDFs missing from the disk, go back to step 1 before applying, otherwise identical copies will remain in duplicate. Remind the user that Zotero empties its trash after 30 days, and that a merge can no longer be undone afterwards. If the user wants to change something, change the decision (in `suivi/doublons.toml` for a decision already made) and plan again. Done when the user has explicitly approved this plan.
 
-5. **Back up.** Once the plan is approved, if the last backup is more than 24 hours old, ask the user to close Zotero, then run `zc backup`. Done when the command displays the backup folder. The user can then reopen Zotero.
+5. **Back up.** Once the plan is approved, if the last backup is older than the configured delay (`delai_heures` in `zc config show`, 24 hours by default), ask the user to close Zotero, then run `zc backup`. Done when the command displays the backup folder. The user can then reopen Zotero.
 
 6. **Trial.** Run `zc apply <plan> --trial`, then check the kept items yourself with `zc show` (fields, attachments and notes attached, collections) and that the absorbed items are no longer read. Tell the user what was checked. Done when the trial is checked.
 

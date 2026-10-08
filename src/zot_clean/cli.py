@@ -915,10 +915,52 @@ def subjects_pending(args) -> int:
     if additions:
         print(L(en=f'{additions} proposal(s) drawn from the tags added to {cfg.tracking / r.FILE}.',
                 fr=f'{additions} proposition(s) tirée(s) des tags ajoutée(s) à {cfg.tracking / r.FILE}.'))
-    print(L(en=f'Items: {output}\nDecisions to write in {cfg.tracking / r.FILE}',
-            fr=f'Fiches : {output}\nDécisions à écrire dans {cfg.tracking / r.FILE}')
-          + (L(en=', created with its header and an example', fr=', créé avec son en-tête et un exemple') if new else '')
+    print(L(en=f'Items: {output}\nDecisions to write with `zc subjects accept KEY=PATH` and `zc subjects reject KEY`, '
+               f'kept in {cfg.tracking / r.FILE}',
+            fr=f'Fiches : {output}\nDécisions à écrire avec `zc subjects accept CLÉ=CHEMIN` et `zc subjects reject CLÉ`, '
+               f'gardées dans {cfg.tracking / r.FILE}')
+          + (L(en=' (created)', fr=' (créé)') if new else '')
           + L(en=', then `zc subjects plan`.', fr=', puis `zc subjects plan`.'))
+    return 0
+
+
+def subjects_decide(args) -> int:
+    """`zc subjects accept` and `zc subjects reject`, filing decisions of suivi/rangement.toml (D245)."""
+    from zot_clean import config, subjects as f, reader, filing as r
+    cfg = config.load(args.workspace)
+    if cause := f.refusal(cfg):
+        print(cause, file=sys.stderr)
+        return 1
+    if args.tracking_action == 'accept' and not (cfg.workspace / f.OUTLINE).is_file():
+        print(L(en=f'{f.OUTLINE} does not exist yet. Filing comes after the outline (step 4).',
+                fr=f"{f.OUTLINE} n'existe pas encore. Le rangement vient après le plan du fonds (étape 4)."),
+              file=sys.stderr)
+        return 1
+    try:
+        b = _read_up_to_date(cfg)  # D171, D240
+    except (FileNotFoundError, reader.UnknownSchema) as e:
+        print(e, file=sys.stderr)
+        return 2
+    if args.tracking_action == 'reject':
+        w = r.reject(b, cfg, args.keys)
+    else:
+        w = r.accept(b, cfg, args.keys, add=args.add, trash=args.trash, origin=(args.from_ or '').strip().upper(),
+                     user=args.user, note=args.note or '')
+    for line in w.notices + w.replaced:
+        print(line)
+    counts = []
+    if w.accepted:
+        counts.append(plural(w.accepted, en='decision accepted', fr='décision acceptée',
+                             en_plural='decisions accepted'))
+    if w.replaced:
+        counts.append(L(en=f'of which {len(w.replaced)} replacing an earlier place',
+                        fr=f'dont {len(w.replaced)} à la place d\'une décision précédente'))
+    if w.rejected:
+        counts.append(plural(w.rejected, en='decision rejected', fr='décision refusée',
+                             en_plural='decisions rejected'))
+    print(_decisions_written(cfg.tracking / r.FILE, counts,
+                             L(en='Then `zc subjects plan`, or `zc inbox plan` while sorting the Inbox.',
+                               fr="Puis `zc subjects plan`, ou `zc inbox plan` pendant le tri de l'Inbox.")))
     return 0
 
 
@@ -1372,6 +1414,22 @@ def build_parser() -> argparse.ArgumentParser:
                    help='notes these items without a place as seen and left out of the subjects')
     _workspace(t)
     t.set_defaults(handler=subjects_pending)
+    t = ss.add_parser('accept', help='Writes filing decisions (KEY=PATH), or accepts the proposals of these items')
+    t.add_argument('keys', nargs='+', metavar='KEY[=PATH]',
+                   help='item, with the path of its theme in plan.md for a new place, in quotes when it has spaces '
+                        "('ABCD2345=Psychology/Visual perception')")
+    t.add_argument('--add', action='store_true', help='a second place, the item leaves nothing')
+    t.add_argument('--trash', action='store_true', help='the items go to the Zotero trash (keys alone)')
+    t.add_argument('--from', dest='from_', metavar='KEY',
+                   help='collection the item leaves, when zc cannot deduce it (item in several themes)')
+    t.add_argument('--user', action='store_true', help='precise request of the user (source "consigne")')
+    t.add_argument('--note', help='one sentence that justifies the decision, kept in the file')
+    _workspace(t)
+    t.set_defaults(handler=subjects_decide, tracking_action='accept')
+    t = ss.add_parser('reject', help='Rejects the proposals or decisions of these items')
+    t.add_argument('keys', nargs='+', metavar='KEY')
+    _workspace(t)
+    t.set_defaults(handler=subjects_decide, tracking_action='reject')
     t = ss.add_parser('plan', help='Prepares the filing plan (step 5), can be rerun after each pass')
     t.add_argument('--roots', action='store_true', help='also renames the roots after [racines] of fonds.toml')
     _workspace(t)

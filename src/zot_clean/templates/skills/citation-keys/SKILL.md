@@ -26,7 +26,7 @@ The words stored in `suivi/cles.toml` (the citation keys file) are French in eve
 
 5. **Have it approved.** Summarize the report, that is the number of duplicate keys and of items that receive a suffix, the Extra lines tidied and the « Warning » section (« Attention » in a French library). Remind the user that an item that receives a suffix changes its key, and that a text that cited it is to be updated. Done when the user has explicitly approved this plan.
 
-6. **Back up, trial, apply.** If the last backup is more than 24 hours old, ask the user to close Zotero and run `zc backup`. Then `zc apply <plan> --trial`, whose groups cover each kind of change (listed in the report). Check these items with `zc show` (citation key and Extra), tell the user, then `zc apply <plan> --all`. An interrupted command is run again as it is. Done when the full application is made.
+6. **Back up, trial, apply.** If the last backup is older than the configured delay (`delai_heures` in `zc config show`, 24 hours by default), ask the user to close Zotero and run `zc backup`. Then `zc apply <plan> --trial`, whose groups cover each kind of change (listed in the report). Check these items with `zc show` (citation key and Extra), tell the user, then `zc apply <plan> --all`. An interrupted command is run again as it is. Done when the full application is made.
 
 7. **Check.** After Zotero's synchronization, run `zc citation-keys plan` again, which should find nothing more to do apart from the cases set aside or to judge, then `zc audit`. Done when the « Citation keys » section reports only what the user chose to leave.
 

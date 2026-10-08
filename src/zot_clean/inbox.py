@@ -182,22 +182,18 @@ def prepare(b: Library, cfg: Config, services: Services, client: Client, schema:
         out += [L(en=f'**Filing.** Impossible for now: {subjects_refusal}',
                   fr=f"**Rangement.** Impossible pour l'instant : {subjects_refusal}"), '']
     else:
-        out += [L(en='**Filing.** For each item, write a `[[fiche]]` table in `suivi/rangement.toml`, like the '
-                     'example of its header, with `cible` = path of the theme in `plan.md` (without the subjects '
-                     'root). For an item of the Inbox, `action = "déplacer"` and `depuis` = the key given below. '
-                     'For an item outside any collection, `action = "ajouter"` without `depuis` ("déplacer" would '
-                     'come to the same). For an item of a project, `action = "ajouter"` without `depuis`, and it '
-                     'stays in its project. The themes and their definitions are in `plan.md`. Have it approved '
-                     'before writing `decision = "accepter"`. With no suitable theme, propose the closest one or a '
+        out += [L(en='**Filing.** For each item, choose a theme of `plan.md`, from its definition. Have the '
+                     'proposals approved, then write them with `zc subjects accept KEY=PATH …` (path of the theme in '
+                     '`plan.md`, without the subjects root). `zc` finds by itself what the item leaves, that is the '
+                     'Inbox for an item of the Inbox, nothing for an item of a project, which stays there. With no '
+                     'suitable theme, propose the closest one or a '
                      'new theme (added to `plan.md` with its definition, then `zc subjects validate`), the item '
                      'staying where it is meanwhile.',
-                  fr="**Rangement.** Pour chaque référence, écrire une table `[[fiche]]` dans `suivi/rangement.toml`, "
-                     "comme l'exemple de son en-tête, avec `cible` = chemin du thème dans `plan.md` (sans la racine "
-                     "du fonds). Pour une référence de l'Inbox, `action = \"déplacer\"` et `depuis` = la clé donnée "
-                     "ci-dessous. Pour une référence hors de toute collection, `action = \"ajouter\"` sans `depuis` "
-                     "(« déplacer » reviendrait au même). Pour une référence d'un projet, `action = \"ajouter\"` sans "
-                     "`depuis`, et elle reste dans son projet. Les thèmes et leurs définitions sont dans `plan.md`. "
-                     "Faire approuver avant d'écrire `decision = \"accepter\"`. Sans thème qui convienne, proposer le "
+                  fr="**Rangement.** Pour chaque référence, choisir un thème de `plan.md`, d'après sa définition. "
+                     "Faire approuver les propositions, puis les écrire avec `zc subjects accept CLÉ=CHEMIN …` "
+                     "(chemin du thème dans `plan.md`, sans la racine du fonds). `zc` trouve seul ce que la référence "
+                     "quitte, à savoir l'Inbox pour une référence de l'Inbox, rien pour une référence d'un projet, qui "
+                     "y reste. Sans thème qui convienne, proposer le "
                      "plus proche ou un nouveau thème (ajouté à `plan.md` avec sa définition, puis `zc subjects "
                      "validate`), la référence restant où elle est en attendant."),
                   '',
@@ -225,9 +221,8 @@ def prepare(b: Library, cfg: Config, services: Services, client: Client, schema:
     for a in listing:
         el = a.item
         no_key_note = L(en=' · without a citation key', fr=' · sans clé de citation')
-        from_text = f' · depuis = "{a.origin}"' if a.origin else ''
         if el.key in hidden:
-            out.append(f'- {el.key} · {privacy.mask()}' + from_text
+            out.append(f'- {el.key} · {privacy.mask()}'
                        + (no_key_note if no_key and not el.fields.get('citationKey', '').strip() else ''))
             continue
         container = next((el.fields[k] for k in CONTAINERS if el.fields.get(k)), '')
@@ -238,12 +233,8 @@ def prepare(b: Library, cfg: Config, services: Services, client: Client, schema:
         kind = type_name(el.type)
         in_container = L(en=f' · in “{container[:60]}”', fr=f' · dans « {container[:60]} »') if container else ''
         in_collections = ', '.join(a.where) or L(en='no collection', fr='aucune collection')
-        if a.origin:
-            action = from_text
-        else:
-            action = L(en=' · action “ajouter”, without depuis', fr=' · action « ajouter », sans depuis')
-            if _situation(a, cfg) == 'projet':
-                action += L(en=', stays in its project', fr=', reste dans son projet')
+        action = L(en=' · stays in its project', fr=' · reste dans son projet') \
+            if not a.origin and _situation(a, cfg) == 'projet' else ''
         line = (f'- {el.key} · {author}, {when}, {title} · {kind}' + in_container
                 + L(en=f' · in {in_collections}', fr=f' · dans {in_collections}') + action
                 + (L(en=f' · tags {tags}', fr=f' · tags {tags}') if tags else ''))
