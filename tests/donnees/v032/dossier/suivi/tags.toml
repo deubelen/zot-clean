@@ -1,0 +1,162 @@
+# Règles des tags, préparées par `zc tags inventaire` (étape 6) et lues par `zc tags planifier`, puis par
+# le tri de l'Inbox. Ce fichier se relit et se modifie à la main ou avec l'agent. `zc tags inventaire` le met à jour
+# sans perdre les décisions prises. Une règle porte sur un nom de tag, jamais sur une fiche. Les décisions
+# s'écrivent avec `zc tags accepter`, `zc tags refuser` et `zc tags ajouter` (voir `zc tags accepter --help`).
+#
+# [automatiques] retire tous les tags automatiques (mots-clés des éditeurs), sauf les exceptions ci-dessous.
+# [importes]     retire de même les mots-clés importés en tags manuels (fiches qui en portent beaucoup, et rares).
+#
+# [[tag]], un tag à juger.
+#   sort     : "supprimer", "garder", "concept" (renommé en `cible`, qui commence par le préfixe des concepts),
+#              "état" (renommé en un état ou une marque de la méthode), "fusionner" (renommé en `cible`).
+#              Un tag automatique gardé reste automatique. Un tag renommé devient manuel.
+#   source   : "zc" (proposé par zc), "agent", "utilisateur". Un tag protégé (technique, état, marque, coloré, liste
+#              [tags] proteges de config.toml) ne change que par une entrée de source "utilisateur".
+#   classe   : "évident" (à approuver en bloc) ou "douteux" (par paquets).
+#   decision : "" (proposé), "accepter" ou "refuser". Seules les entrées acceptées s'appliquent. Tant qu'une entrée
+#              attend, son tag échappe aux règles globales.
+#   effectif (fiches qui le portent, directement ou par un enfant), dispersion (thèmes du fonds où elles sont),
+#   themes, theme (thème qu'il double), recherches (recherches enregistrées qui le citent) : renseignés par zc.
+#   variantes : autres noms de même forme, ramenés à `nom` avant d'appliquer le sort (par exemple supprimés avec
+#              lui). zc les réunit ici plutôt que dans un [[variantes]] quand il propose de supprimer le tag.
+#
+# [[variantes]], des noms qui ne diffèrent que par la casse, les accents, les espaces, le préfixe ou le pluriel,
+#   ramenés à `cible`, posée en tag manuel. "évident" quand seul le pluriel n'intervient pas. Un concept s'écrit en
+#   minuscules sauf nom propre, dans la langue de l'utilisateur, espaces permis (« #cognition incarnée »).
+#
+# Un tag porté seulement par des fiches confidentielles apparaît sous un identifiant (« tag confidentiel 1a2b3c4d »),
+# utilisable comme nom dans une entrée de source "utilisateur".
+
+[automatiques]
+# 5 noms automatique(s), 10 occurrence(s). La règle en retire 2 nom(s) et 3 occurrence(s), les exceptions sont dans les [[tag]] et [[variantes]] en attente.
+sort = "supprimer"
+decision = "accepter"
+
+[importes]
+# 1 fiche porte(nt) plus de 8 tags manuels hors familles, rares pour la plupart (mots-clés importés). 10 nom(s) et 10 occurrence(s) retirés si la règle est acceptée.
+sort = "supprimer"
+decision = "accepter"
+
+[[tag]]
+# Durand 2020, « Emotional memory » · Durand 2020, « Fear and faces » · Durand 2020, « Learning to see »
+nom = "Attention"
+type = "automatique"
+effectif = 5
+dispersion = 2
+themes = ["Psychologie/Émotion", "Psychologie/Perception"]
+sort = "concept"
+cible = "#attention"
+source = "zc"
+classe = "douteux"
+decision = "accepter"
+note = "réparti sur 2 thèmes du fonds, nom à vérifier (minuscules sauf nom propre, dans la langue de l'utilisateur) et définition à proposer"
+
+[[tag]]
+# Durand 2020, « Fear and faces »
+nom = "émotion"
+type = "les deux"
+effectif = 3
+dispersion = 1
+themes = ["Psychologie/Émotion"]
+theme = "Psychologie/Émotion"
+variantes = ["Emotion", "emotions"]
+sort = "garder"
+cible = ""
+source = "zc"
+classe = "douteux"
+decision = "accepter"
+note = "double le thème, gardé"
+
+[[tag]]
+# Durand 2020, « Une chose »
+nom = "machine learning"
+type = "manuel"
+effectif = 2
+dispersion = 2
+themes = ["Arts", "Psychologie/Émotion"]
+sort = "concept"
+cible = "#machine learning"
+source = "zc"
+classe = "douteux"
+decision = "accepter"
+note = "réparti sur 2 thèmes du fonds, nom à vérifier (minuscules sauf nom propre, dans la langue de l'utilisateur) et définition à proposer"
+
+[[tag]]
+# Durand 2020, « Fear and faces » · Durand 2020, « Learning to see »
+nom = "mémoire"
+type = "manuel"
+effectif = 2
+dispersion = 2
+themes = ["Psychologie/Émotion", "Psychologie/Perception"]
+sort = "concept"
+cible = "#mémoire"
+source = "zc"
+classe = "douteux"
+decision = "refuser"
+note = "réparti sur 2 thèmes du fonds, nom à vérifier (minuscules sauf nom propre, dans la langue de l'utilisateur) et définition à proposer"
+
+[[tag]]
+# Durand 2020, « Learning to see » · Durand 2020, « Perceptual learning »
+nom = "perception visuelle"
+type = "manuel"
+effectif = 2
+dispersion = 1
+themes = ["Psychologie/Perception"]
+theme = "Psychologie/Perception"
+sort = "supprimer"
+cible = ""
+source = "zc"
+classe = "douteux"
+decision = "accepter"
+note = "concentré dans le thème « Psychologie/Perception », il le double"
+
+[[tag]]
+# Durand 2020, « Learning to see » · Durand 2020, « Perceptual learning »
+nom = "to read"
+type = "manuel"
+effectif = 2
+dispersion = 1
+themes = ["Psychologie/Perception"]
+sort = "état"
+cible = "1 à lire"
+source = "zc"
+classe = "douteux"
+decision = "accepter"
+note = "état ou marque venu d'une autre habitude, à confirmer"
+
+[[tag]]
+# Durand 2020, « Une chose »
+nom = "truc divers"
+type = "manuel"
+effectif = 1
+dispersion = 1
+themes = ["Arts"]
+sort = "supprimer"
+cible = ""
+source = "zc"
+classe = "évident"
+decision = "accepter"
+note = "porté par une seule fiche, sans ressemblance avec un concept ou un thème"
+
+[[tag]]
+# Durand 2020, « Learning to see »
+nom = "Vision"
+type = "automatique"
+effectif = 1
+dispersion = 1
+themes = ["Psychologie/Perception"]
+recherches = ["Vision"]
+sort = "supprimer"
+cible = ""
+source = "zc"
+classe = "douteux"
+decision = "accepter"
+note = "la règle globale le retirerait sans cette exception. cité par une recherche enregistrée"
+
+[[variantes]]
+# Machine-Learning (1, manuel) · machine learning (1, manuel)
+noms = ["Machine-Learning", "machine learning"]
+cible = "machine learning"
+classe = "évident"
+source = "zc"
+decision = "accepter"

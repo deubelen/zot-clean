@@ -1,4 +1,4 @@
-"""Mettre et garder de l'ordre dans sa bibliothèque Zotero."""
+"""Tidy up and keep tidy a Zotero library."""
 
 from importlib.metadata import version
 

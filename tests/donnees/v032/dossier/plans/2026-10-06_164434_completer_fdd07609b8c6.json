@@ -1,0 +1,39 @@
+{
+ "format": 2,
+ "empreinte": "fdd07609b8c6",
+ "etape": "completer",
+ "bibliotheque": 4242,
+ "groupes": [
+  {
+   "id": "2222UUB6",
+   "titre": "Categorical perception of colour in the left and right visual field",
+   "operations": [
+    {
+     "cle": "2222UUB6",
+     "avant": {
+      "volume": "",
+      "issue": "",
+      "pages": "",
+      "publicationTitle": ""
+     },
+     "apres": {
+      "volume": "104",
+      "issue": "3",
+      "pages": "1097-1102",
+      "publicationTitle": "PNAS"
+     },
+     "rang": 0,
+     "nature": "complété depuis crossref",
+     "genre": "items",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  }
+ ],
+ "description": "Champs vides complétés depuis les sources de métadonnées.",
+ "partiel": false,
+ "annule": [],
+ "cree": "2026-10-06T16:44:34+02:00"
+}

@@ -1,0 +1,222 @@
+{
+ "format": 2,
+ "empreinte": "80559cfd1e18",
+ "etape": "fonds",
+ "bibliotheque": 4242,
+ "groupes": [
+  {
+   "id": "1",
+   "titre": "40 Fonds/Psychologie/Perception/Apprentissage perceptif",
+   "operations": [
+    {
+     "cle": "IYL2RB7R",
+     "avant": {},
+     "apres": {
+      "name": "Apprentissage perceptif",
+      "parentCollection": "2222UUB9"
+     },
+     "rang": 0,
+     "nature": "création",
+     "genre": "collections",
+     "creation": true,
+     "enfants": null,
+     "exige": null
+    },
+    {
+     "cle": "2222UUBF",
+     "avant": {
+      "collections": [
+       "2222UUB9",
+       "2222UUBE"
+      ]
+     },
+     "apres": {
+      "collections": [
+       "2222UUBE",
+       "IYL2RB7R"
+      ]
+     },
+     "rang": 1,
+     "nature": "rangement",
+     "genre": "items",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    },
+    {
+     "cle": "2222UUBH",
+     "avant": {
+      "collections": [
+       "2222UUB9"
+      ]
+     },
+     "apres": {
+      "collections": [
+       "IYL2RB7R"
+      ]
+     },
+     "rang": 1,
+     "nature": "rangement",
+     "genre": "items",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  },
+  {
+   "id": "2",
+   "titre": "40 Fonds/Psychologie/Émotion",
+   "operations": [
+    {
+     "cle": "2222UUBA",
+     "avant": {
+      "name": "Émotions"
+     },
+     "apres": {
+      "name": "Émotion"
+     },
+     "rang": 0,
+     "nature": "renommage",
+     "genre": "collections",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  },
+  {
+   "id": "3",
+   "titre": "40 Fonds/Arts",
+   "operations": [
+    {
+     "cle": "2222UUBJ",
+     "avant": {
+      "collections": [
+       "2222UUBC"
+      ]
+     },
+     "apres": {
+      "collections": [
+       "2222UUBB"
+      ]
+     },
+     "rang": 1,
+     "nature": "rangement",
+     "genre": "items",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  },
+  {
+   "id": "4",
+   "titre": "80 Archives/Vieux",
+   "operations": [
+    {
+     "cle": "DFLSZE8K",
+     "avant": {},
+     "apres": {
+      "name": "Vieux",
+      "parentCollection": "2222UUB5"
+     },
+     "rang": 0,
+     "nature": "création",
+     "genre": "collections",
+     "creation": true,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  },
+  {
+   "id": "5",
+   "titre": "80 Archives/Vieux/Cours ancien",
+   "operations": [
+    {
+     "cle": "2222UUBD",
+     "avant": {
+      "parentCollection": "2222UUB7"
+     },
+     "apres": {
+      "parentCollection": "DFLSZE8K"
+     },
+     "rang": 0,
+     "nature": "déplacement",
+     "genre": "collections",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  },
+  {
+   "id": "6",
+   "titre": "corbeille : 40 Fonds/Arts/Musées",
+   "operations": [
+    {
+     "cle": "2222UUBC",
+     "avant": {
+      "deleted": false
+     },
+     "apres": {
+      "deleted": true
+     },
+     "rang": 0,
+     "nature": "corbeille",
+     "genre": "collections",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  },
+  {
+   "id": "7",
+   "titre": "corbeille : Vieux",
+   "operations": [
+    {
+     "cle": "2222UUB7",
+     "avant": {
+      "deleted": false
+     },
+     "apres": {
+      "deleted": true
+     },
+     "rang": 0,
+     "nature": "corbeille",
+     "genre": "collections",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  },
+  {
+   "id": "8",
+   "titre": "fiches à la corbeille",
+   "operations": [
+    {
+     "cle": "2222UUBL",
+     "avant": {
+      "deleted": false
+     },
+     "apres": {
+      "deleted": true
+     },
+     "rang": 0,
+     "nature": "corbeille",
+     "genre": "items",
+     "creation": false,
+     "enfants": [],
+     "exige": null
+    }
+   ]
+  }
+ ],
+ "description": "Rangement du fonds, 8 groupe(s).",
+ "partiel": false,
+ "annule": [],
+ "cree": "2026-10-06T16:44:37+02:00"
+}

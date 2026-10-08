@@ -1,0 +1,397 @@
+{
+ "format": 2,
+ "empreinte": "96f5dc04fc77",
+ "etape": "tags",
+ "bibliotheque": 4242,
+ "groupes": [
+  {
+   "id": "tagColors",
+   "titre": "couleurs des tags de la méthode",
+   "operations": [
+    {
+     "cle": "tagColors",
+     "avant": {
+      "value": null
+     },
+     "apres": {
+      "value": [
+       {
+        "name": "1 à lire",
+        "color": "#FF6666"
+       },
+       {
+        "name": "2 en cours",
+        "color": "#FF8C19"
+       },
+       {
+        "name": "3 lu",
+        "color": "#5FB236"
+       },
+       {
+        "name": "★ essentiel",
+        "color": "#FFD400"
+       },
+       {
+        "name": "papier",
+        "color": "#A28AE5"
+       }
+      ]
+     },
+     "rang": 0,
+     "nature": "couleurs des tags de la méthode",
+     "genre": "settings",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  },
+  {
+   "id": "2222UUB9",
+   "titre": "Durand, 2020, Learning to see",
+   "operations": [
+    {
+     "cle": "2222UUB9",
+     "avant": {
+      "tags": [
+       {
+        "tag": "Humans",
+        "type": 1
+       },
+       {
+        "tag": "Attention",
+        "type": 1
+       },
+       {
+        "tag": "to read"
+       },
+       {
+        "tag": "perception visuelle"
+       },
+       {
+        "tag": "mémoire"
+       },
+       {
+        "tag": "Vision",
+        "type": 1
+       }
+      ]
+     },
+     "apres": {
+      "tags": [
+       {
+        "tag": "#attention"
+       },
+       {
+        "tag": "1 à lire"
+       },
+       {
+        "tag": "mémoire"
+       }
+      ]
+     },
+     "rang": 0,
+     "nature": "automatique, état, concept, suppression",
+     "genre": "items",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  },
+  {
+   "id": "2222UUBC",
+   "titre": "Durand, 2020, Emotional memory",
+   "operations": [
+    {
+     "cle": "2222UUBC",
+     "avant": {
+      "tags": [
+       {
+        "tag": "Attention",
+        "type": 1
+       },
+       {
+        "tag": "Emotion",
+        "type": 1
+       }
+      ]
+     },
+     "apres": {
+      "tags": [
+       {
+        "tag": "#attention"
+       },
+       {
+        "tag": "émotion"
+       }
+      ]
+     },
+     "rang": 0,
+     "nature": "variante, concept",
+     "genre": "items",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  },
+  {
+   "id": "2222UUBG",
+   "titre": "Durand, 2020, Importée",
+   "operations": [
+    {
+     "cle": "2222UUBG",
+     "avant": {
+      "tags": [
+       {
+        "tag": "mot-clé 0"
+       },
+       {
+        "tag": "mot-clé 1"
+       },
+       {
+        "tag": "mot-clé 2"
+       },
+       {
+        "tag": "mot-clé 3"
+       },
+       {
+        "tag": "mot-clé 4"
+       },
+       {
+        "tag": "mot-clé 5"
+       },
+       {
+        "tag": "mot-clé 6"
+       },
+       {
+        "tag": "mot-clé 7"
+       },
+       {
+        "tag": "mot-clé 8"
+       },
+       {
+        "tag": "mot-clé 9"
+       }
+      ]
+     },
+     "apres": {
+      "tags": []
+     },
+     "rang": 0,
+     "nature": "importé",
+     "genre": "items",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  },
+  {
+   "id": "2222UUBH",
+   "titre": "(fiche confidentielle)",
+   "operations": [
+    {
+     "cle": "2222UUBH",
+     "avant": {
+      "tags": [
+       {
+        "tag": "_privé"
+       },
+       {
+        "tag": "patient Dupont"
+       },
+       {
+        "tag": "Secretauto",
+        "type": 1
+       }
+      ]
+     },
+     "apres": {
+      "tags": [
+       {
+        "tag": "_privé"
+       },
+       {
+        "tag": "patient Dupont"
+       }
+      ]
+     },
+     "rang": 0,
+     "nature": "automatique",
+     "genre": "items",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  },
+  {
+   "id": "2222UUBB",
+   "titre": "Durand, 2020, Fear and faces",
+   "operations": [
+    {
+     "cle": "2222UUBB",
+     "avant": {
+      "tags": [
+       {
+        "tag": "Attention",
+        "type": 1
+       },
+       {
+        "tag": "émotion"
+       },
+       {
+        "tag": "mémoire"
+       }
+      ]
+     },
+     "apres": {
+      "tags": [
+       {
+        "tag": "#attention"
+       },
+       {
+        "tag": "émotion"
+       },
+       {
+        "tag": "mémoire"
+       }
+      ]
+     },
+     "rang": 0,
+     "nature": "concept",
+     "genre": "items",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  },
+  {
+   "id": "2222UUBD",
+   "titre": "Durand, 2020, Moods",
+   "operations": [
+    {
+     "cle": "2222UUBD",
+     "avant": {
+      "tags": [
+       {
+        "tag": "Attention",
+        "type": 1
+       },
+       {
+        "tag": "emotions"
+       },
+       {
+        "tag": "Machine-Learning"
+       }
+      ]
+     },
+     "apres": {
+      "tags": [
+       {
+        "tag": "#attention"
+       },
+       {
+        "tag": "émotion"
+       },
+       {
+        "tag": "#machine learning"
+       }
+      ]
+     },
+     "rang": 0,
+     "nature": "variante, concept",
+     "genre": "items",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  },
+  {
+   "id": "2222UUBA",
+   "titre": "Durand, 2020, Perceptual learning",
+   "operations": [
+    {
+     "cle": "2222UUBA",
+     "avant": {
+      "tags": [
+       {
+        "tag": "Humans",
+        "type": 1
+       },
+       {
+        "tag": "Attention",
+        "type": 1
+       },
+       {
+        "tag": "perception visuelle"
+       },
+       {
+        "tag": "3 lu"
+       },
+       {
+        "tag": "to read"
+       }
+      ]
+     },
+     "apres": {
+      "tags": [
+       {
+        "tag": "#attention"
+       },
+       {
+        "tag": "3 lu"
+       }
+      ]
+     },
+     "rang": 0,
+     "nature": "automatique, état, concept, suppression",
+     "genre": "items",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  },
+  {
+   "id": "2222UUBE",
+   "titre": "Durand, 2020, Une chose",
+   "operations": [
+    {
+     "cle": "2222UUBE",
+     "avant": {
+      "tags": [
+       {
+        "tag": "truc divers"
+       },
+       {
+        "tag": "machine learning"
+       }
+      ]
+     },
+     "apres": {
+      "tags": [
+       {
+        "tag": "#machine learning"
+       }
+      ]
+     },
+     "rang": 0,
+     "nature": "concept, suppression",
+     "genre": "items",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  }
+ ],
+ "description": "Tags, 8 éléments, et couleurs des tags de la méthode.",
+ "partiel": false,
+ "annule": [],
+ "cree": "2026-10-06T16:44:29+02:00"
+}

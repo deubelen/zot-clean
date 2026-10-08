@@ -1,0 +1,1770 @@
+{
+ "plans": {
+  "plans/2026-10-06_164429_annulation_a91855a72c3f.json": {
+   "format": 2,
+   "empreinte": "a91855a72c3f",
+   "etape": "annulation",
+   "bibliotheque": 4242,
+   "partiel": true,
+   "annule": [
+    "2026-10-06_164429_tags.jsonl",
+    "2026-10-06_164429_tags_2.jsonl"
+   ],
+   "groupes": [
+    "2222UUBA",
+    "2222UUBD",
+    "2222UUBB",
+    "2222UUBH",
+    "2222UUBG",
+    "2222UUBC",
+    "2222UUB9",
+    "tagColors"
+   ],
+   "operations": 8
+  },
+  "plans/2026-10-06_164429_tags_96f5dc04fc77.json": {
+   "format": 2,
+   "empreinte": "96f5dc04fc77",
+   "etape": "tags",
+   "bibliotheque": 4242,
+   "partiel": false,
+   "annule": [],
+   "groupes": [
+    "tagColors",
+    "2222UUB9",
+    "2222UUBC",
+    "2222UUBG",
+    "2222UUBH",
+    "2222UUBB",
+    "2222UUBD",
+    "2222UUBA",
+    "2222UUBE"
+   ],
+   "operations": 9
+  },
+  "plans/2026-10-06_164430_inbox_d9aae58794d1.json": {
+   "format": 2,
+   "empreinte": "d9aae58794d1",
+   "etape": "inbox",
+   "bibliotheque": 4242,
+   "partiel": false,
+   "annule": [],
+   "groupes": [
+    "fusion-1",
+    "2222UUBC",
+    "2222UUBE"
+   ],
+   "operations": 5
+  },
+  "plans/2026-10-06_164432_annulation_83a559465ea6.json": {
+   "format": 2,
+   "empreinte": "83a559465ea6",
+   "etape": "annulation",
+   "bibliotheque": 4242,
+   "partiel": true,
+   "annule": [
+    "2026-10-06_164432_doublons.jsonl"
+   ],
+   "groupes": [
+    "1"
+   ],
+   "operations": 3
+  },
+  "plans/2026-10-06_164432_doublons_6ac441b56fbd.json": {
+   "format": 2,
+   "empreinte": "6ac441b56fbd",
+   "etape": "doublons",
+   "bibliotheque": 4242,
+   "partiel": false,
+   "annule": [],
+   "groupes": [
+    "1"
+   ],
+   "operations": 3
+  },
+  "plans/2026-10-06_164433_pieces_9d0067e90eb6.json": {
+   "format": 2,
+   "empreinte": "9d0067e90eb6",
+   "etape": "pieces",
+   "bibliotheque": 4242,
+   "partiel": false,
+   "annule": [],
+   "groupes": [
+    "1",
+    "2",
+    "3"
+   ],
+   "operations": 4
+  },
+  "plans/2026-10-06_164434_completer_fdd07609b8c6.json": {
+   "format": 2,
+   "empreinte": "fdd07609b8c6",
+   "etape": "completer",
+   "bibliotheque": 4242,
+   "partiel": false,
+   "annule": [],
+   "groupes": [
+    "2222UUB6"
+   ],
+   "operations": 1
+  },
+  "plans/2026-10-06_164434_identifiants_9f4e57e9efe6.json": {
+   "format": 2,
+   "empreinte": "9f4e57e9efe6",
+   "etape": "identifiants",
+   "bibliotheque": 4242,
+   "partiel": false,
+   "annule": [],
+   "groupes": [
+    "2222UUB3"
+   ],
+   "operations": 1
+  },
+  "plans/2026-10-06_164434_types_6c8e6b64e3a2.json": {
+   "format": 2,
+   "empreinte": "6c8e6b64e3a2",
+   "etape": "types",
+   "bibliotheque": 4242,
+   "partiel": false,
+   "annule": [],
+   "groupes": [
+    "2222UUB5"
+   ],
+   "operations": 1
+  },
+  "plans/2026-10-06_164435_cles_05063a7ff4a7.json": {
+   "format": 2,
+   "empreinte": "05063a7ff4a7",
+   "etape": "cles",
+   "bibliotheque": 4242,
+   "partiel": false,
+   "annule": [],
+   "groupes": [
+    "double-2222UUB4",
+    "2222UUB6",
+    "2222UUB7",
+    "2222UUB8"
+   ],
+   "operations": 5
+  },
+  "plans/2026-10-06_164436_noms_4e3b080321fa.json": {
+   "format": 2,
+   "empreinte": "4e3b080321fa",
+   "etape": "noms",
+   "bibliotheque": 4242,
+   "partiel": false,
+   "annule": [],
+   "groupes": [
+    "2222UUB9",
+    "2222UUB7",
+    "2222UUB5",
+    "2222UUB3"
+   ],
+   "operations": 4
+  },
+  "plans/2026-10-06_164437_fonds_80559cfd1e18.json": {
+   "format": 2,
+   "empreinte": "80559cfd1e18",
+   "etape": "fonds",
+   "bibliotheque": 4242,
+   "partiel": false,
+   "annule": [],
+   "groupes": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8"
+   ],
+   "operations": 10
+  },
+  "format1/2026-10-06_164429_annulation_a91855a72c3f.json": {
+   "format": 1,
+   "empreinte": "e6f6fa7fc046",
+   "etape": "annulation",
+   "bibliotheque": 4242,
+   "partiel": true,
+   "annule": [
+    "2026-10-06_164429_tags.jsonl",
+    "2026-10-06_164429_tags_2.jsonl"
+   ],
+   "groupes": [
+    "2222UUBA",
+    "2222UUBD",
+    "2222UUBB",
+    "2222UUBH",
+    "2222UUBG",
+    "2222UUBC",
+    "2222UUB9",
+    "tagColors"
+   ],
+   "operations": 8
+  },
+  "format1/2026-10-06_164429_tags_96f5dc04fc77.json": {
+   "format": 1,
+   "empreinte": "96f5dc04fc77",
+   "etape": "tags",
+   "bibliotheque": 4242,
+   "partiel": false,
+   "annule": [],
+   "groupes": [
+    "tagColors",
+    "2222UUB9",
+    "2222UUBC",
+    "2222UUBG",
+    "2222UUBH",
+    "2222UUBB",
+    "2222UUBD",
+    "2222UUBA",
+    "2222UUBE"
+   ],
+   "operations": 9
+  },
+  "format1/2026-10-06_164430_inbox_d9aae58794d1.json": {
+   "format": 1,
+   "empreinte": "aba2e271b0e5",
+   "etape": "inbox",
+   "bibliotheque": 4242,
+   "partiel": false,
+   "annule": [],
+   "groupes": [
+    "fusion-1",
+    "2222UUBC",
+    "2222UUBE"
+   ],
+   "operations": 5
+  },
+  "format1/2026-10-06_164432_annulation_83a559465ea6.json": {
+   "format": 1,
+   "empreinte": "7de6edaa92ec",
+   "etape": "annulation",
+   "bibliotheque": 4242,
+   "partiel": true,
+   "annule": [
+    "2026-10-06_164432_doublons.jsonl"
+   ],
+   "groupes": [
+    "1"
+   ],
+   "operations": 3
+  },
+  "format1/2026-10-06_164432_doublons_6ac441b56fbd.json": {
+   "format": 1,
+   "empreinte": "e081aa21de03",
+   "etape": "doublons",
+   "bibliotheque": 4242,
+   "partiel": false,
+   "annule": [],
+   "groupes": [
+    "1"
+   ],
+   "operations": 3
+  },
+  "format1/2026-10-06_164433_pieces_9d0067e90eb6.json": {
+   "format": 1,
+   "empreinte": "74935be19f18",
+   "etape": "pieces",
+   "bibliotheque": 4242,
+   "partiel": false,
+   "annule": [],
+   "groupes": [
+    "1",
+    "2",
+    "3"
+   ],
+   "operations": 4
+  },
+  "format1/2026-10-06_164434_completer_fdd07609b8c6.json": {
+   "format": 1,
+   "empreinte": "fdd07609b8c6",
+   "etape": "completer",
+   "bibliotheque": 4242,
+   "partiel": false,
+   "annule": [],
+   "groupes": [
+    "2222UUB6"
+   ],
+   "operations": 1
+  },
+  "format1/2026-10-06_164434_identifiants_9f4e57e9efe6.json": {
+   "format": 1,
+   "empreinte": "9f4e57e9efe6",
+   "etape": "identifiants",
+   "bibliotheque": 4242,
+   "partiel": false,
+   "annule": [],
+   "groupes": [
+    "2222UUB3"
+   ],
+   "operations": 1
+  },
+  "format1/2026-10-06_164434_types_6c8e6b64e3a2.json": {
+   "format": 1,
+   "empreinte": "6c8e6b64e3a2",
+   "etape": "types",
+   "bibliotheque": 4242,
+   "partiel": false,
+   "annule": [],
+   "groupes": [
+    "2222UUB5"
+   ],
+   "operations": 1
+  },
+  "format1/2026-10-06_164435_cles_05063a7ff4a7.json": {
+   "format": 1,
+   "empreinte": "05063a7ff4a7",
+   "etape": "cles",
+   "bibliotheque": 4242,
+   "partiel": false,
+   "annule": [],
+   "groupes": [
+    "double-2222UUB4",
+    "2222UUB6",
+    "2222UUB7",
+    "2222UUB8"
+   ],
+   "operations": 5
+  },
+  "format1/2026-10-06_164436_noms_4e3b080321fa.json": {
+   "format": 1,
+   "empreinte": "4e3b080321fa",
+   "etape": "noms",
+   "bibliotheque": 4242,
+   "partiel": false,
+   "annule": [],
+   "groupes": [
+    "2222UUB9",
+    "2222UUB7",
+    "2222UUB5",
+    "2222UUB3"
+   ],
+   "operations": 4
+  },
+  "format1/2026-10-06_164437_fonds_80559cfd1e18.json": {
+   "format": 1,
+   "empreinte": "13f2ac68ff4d",
+   "etape": "fonds",
+   "bibliotheque": 4242,
+   "partiel": false,
+   "annule": [],
+   "groupes": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8"
+   ],
+   "operations": 10
+  }
+ },
+ "journaux": {
+  "2026-10-06_164429_annulation.jsonl": {
+   "en_tete": {
+    "type": "en-tete",
+    "plan": "2026-10-06_164429_annulation_a91855a72c3f.json",
+    "empreinte": "a91855a72c3f",
+    "etape": "annulation",
+    "mode": "essai",
+    "bibliotheque": 4242,
+    "reprise": false,
+    "annule": [
+     "2026-10-06_164429_tags.jsonl",
+     "2026-10-06_164429_tags_2.jsonl"
+    ]
+   },
+   "groupes": {
+    "2222UUBA": "fait",
+    "2222UUBD": "fait",
+    "2222UUBB": "fait",
+    "2222UUBH": "fait",
+    "2222UUBG": "fait"
+   },
+   "elements": 5,
+   "termine": true
+  },
+  "2026-10-06_164429_annulation_2.jsonl": {
+   "en_tete": {
+    "type": "en-tete",
+    "plan": "2026-10-06_164429_annulation_a91855a72c3f.json",
+    "empreinte": "a91855a72c3f",
+    "etape": "annulation",
+    "mode": "tout",
+    "bibliotheque": 4242,
+    "reprise": true,
+    "annule": [
+     "2026-10-06_164429_tags.jsonl",
+     "2026-10-06_164429_tags_2.jsonl"
+    ]
+   },
+   "groupes": {
+    "2222UUBC": "partiel",
+    "2222UUB9": "fait",
+    "tagColors": "fait"
+   },
+   "elements": 2,
+   "termine": true
+  },
+  "2026-10-06_164429_tags.jsonl": {
+   "en_tete": {
+    "type": "en-tete",
+    "plan": "2026-10-06_164429_tags_96f5dc04fc77.json",
+    "empreinte": "96f5dc04fc77",
+    "etape": "tags",
+    "mode": "essai",
+    "bibliotheque": 4242,
+    "reprise": false,
+    "annule": []
+   },
+   "groupes": {
+    "tagColors": "fait",
+    "2222UUB9": "fait",
+    "2222UUBC": "fait",
+    "2222UUBG": "fait",
+    "2222UUBH": "fait"
+   },
+   "elements": 5,
+   "termine": true
+  },
+  "2026-10-06_164429_tags_2.jsonl": {
+   "en_tete": {
+    "type": "en-tete",
+    "plan": "2026-10-06_164429_tags_96f5dc04fc77.json",
+    "empreinte": "96f5dc04fc77",
+    "etape": "tags",
+    "mode": "tout",
+    "bibliotheque": 4242,
+    "reprise": true,
+    "annule": []
+   },
+   "groupes": {
+    "2222UUBB": "fait",
+    "2222UUBD": "fait",
+    "2222UUBA": "fait",
+    "2222UUBE": "conflit"
+   },
+   "elements": 3,
+   "termine": true
+  },
+  "2026-10-06_164430_inbox.jsonl": {
+   "en_tete": {
+    "type": "en-tete",
+    "plan": "2026-10-06_164430_inbox_d9aae58794d1.json",
+    "empreinte": "d9aae58794d1",
+    "etape": "inbox",
+    "mode": "essai",
+    "bibliotheque": 4242,
+    "reprise": false,
+    "annule": []
+   },
+   "groupes": {
+    "fusion-1": "fait",
+    "2222UUBC": "fait",
+    "2222UUBE": "fait"
+   },
+   "elements": 5,
+   "termine": true
+  },
+  "2026-10-06_164432_annulation.jsonl": {
+   "en_tete": {
+    "type": "en-tete",
+    "plan": "2026-10-06_164432_annulation_83a559465ea6.json",
+    "empreinte": "83a559465ea6",
+    "etape": "annulation",
+    "mode": "essai",
+    "bibliotheque": 4242,
+    "reprise": false,
+    "annule": [
+     "2026-10-06_164432_doublons.jsonl"
+    ]
+   },
+   "groupes": {
+    "1": "fait"
+   },
+   "elements": 3,
+   "termine": true
+  },
+  "2026-10-06_164432_doublons.jsonl": {
+   "en_tete": {
+    "type": "en-tete",
+    "plan": "2026-10-06_164432_doublons_6ac441b56fbd.json",
+    "empreinte": "6ac441b56fbd",
+    "etape": "doublons",
+    "mode": "essai",
+    "bibliotheque": 4242,
+    "reprise": false,
+    "annule": []
+   },
+   "groupes": {
+    "1": "fait"
+   },
+   "elements": 3,
+   "termine": true
+  },
+  "2026-10-06_164433_pieces.jsonl": {
+   "en_tete": {
+    "type": "en-tete",
+    "plan": "2026-10-06_164433_pieces_9d0067e90eb6.json",
+    "empreinte": "9d0067e90eb6",
+    "etape": "pieces",
+    "mode": "essai",
+    "bibliotheque": 4242,
+    "reprise": false,
+    "annule": []
+   },
+   "groupes": {
+    "1": "fait",
+    "2": "fait",
+    "3": "fait"
+   },
+   "elements": 4,
+   "termine": true
+  },
+  "2026-10-06_164435_cles.jsonl": {
+   "en_tete": {
+    "type": "en-tete",
+    "plan": "2026-10-06_164435_cles_05063a7ff4a7.json",
+    "empreinte": "05063a7ff4a7",
+    "etape": "cles",
+    "mode": "essai",
+    "bibliotheque": 4242,
+    "reprise": false,
+    "annule": []
+   },
+   "groupes": {},
+   "elements": 0,
+   "termine": false
+  },
+  "2026-10-06_164436_noms.jsonl": {
+   "en_tete": {
+    "type": "en-tete",
+    "plan": "2026-10-06_164436_noms_4e3b080321fa.json",
+    "empreinte": "4e3b080321fa",
+    "etape": "noms",
+    "mode": "essai",
+    "bibliotheque": 4242,
+    "reprise": false,
+    "annule": []
+   },
+   "groupes": {
+    "2222UUB9": "fait",
+    "2222UUB7": "fait"
+   },
+   "elements": 2,
+   "termine": true
+  },
+  "2026-10-06_164437_fonds.jsonl": {
+   "en_tete": {
+    "type": "en-tete",
+    "plan": "2026-10-06_164437_fonds_80559cfd1e18.json",
+    "empreinte": "80559cfd1e18",
+    "etape": "fonds",
+    "mode": "essai",
+    "bibliotheque": 4242,
+    "reprise": false,
+    "annule": []
+   },
+   "groupes": {
+    "1": "fait",
+    "2": "fait",
+    "3": "fait",
+    "4": "fait",
+    "5": "fait"
+   },
+   "elements": 7,
+   "termine": true
+  },
+  "2026-10-06_164437_fonds_2.jsonl": {
+   "en_tete": {
+    "type": "en-tete",
+    "plan": "2026-10-06_164437_fonds_80559cfd1e18.json",
+    "empreinte": "80559cfd1e18",
+    "etape": "fonds",
+    "mode": "tout",
+    "bibliotheque": 4242,
+    "reprise": true,
+    "annule": []
+   },
+   "groupes": {
+    "6": "fait",
+    "7": "fait",
+    "8": "fait"
+   },
+   "elements": 3,
+   "termine": true
+  }
+ },
+ "etat_des_plans": {
+  "2026-10-06_164429_annulation_a91855a72c3f.json": {
+   "groupes_faits": [
+    "2222UUB9",
+    "2222UUBA",
+    "2222UUBB",
+    "2222UUBC",
+    "2222UUBD",
+    "2222UUBG",
+    "2222UUBH",
+    "tagColors"
+   ],
+   "essai_fait": true,
+   "en_suspens": []
+  },
+  "2026-10-06_164429_tags_96f5dc04fc77.json": {
+   "groupes_faits": [],
+   "essai_fait": false,
+   "en_suspens": []
+  },
+  "2026-10-06_164430_inbox_d9aae58794d1.json": {
+   "groupes_faits": [
+    "2222UUBC",
+    "2222UUBE",
+    "fusion-1"
+   ],
+   "essai_fait": true,
+   "en_suspens": []
+  },
+  "2026-10-06_164432_annulation_83a559465ea6.json": {
+   "groupes_faits": [
+    "1"
+   ],
+   "essai_fait": true,
+   "en_suspens": []
+  },
+  "2026-10-06_164432_doublons_6ac441b56fbd.json": {
+   "groupes_faits": [],
+   "essai_fait": false,
+   "en_suspens": []
+  },
+  "2026-10-06_164433_pieces_9d0067e90eb6.json": {
+   "groupes_faits": [
+    "1",
+    "2",
+    "3"
+   ],
+   "essai_fait": true,
+   "en_suspens": []
+  },
+  "2026-10-06_164434_completer_fdd07609b8c6.json": {
+   "groupes_faits": [],
+   "essai_fait": false,
+   "en_suspens": []
+  },
+  "2026-10-06_164434_identifiants_9f4e57e9efe6.json": {
+   "groupes_faits": [],
+   "essai_fait": false,
+   "en_suspens": []
+  },
+  "2026-10-06_164434_types_6c8e6b64e3a2.json": {
+   "groupes_faits": [],
+   "essai_fait": false,
+   "en_suspens": []
+  },
+  "2026-10-06_164435_cles_05063a7ff4a7.json": {
+   "groupes_faits": [],
+   "essai_fait": false,
+   "en_suspens": [
+    [
+     "2222UUB6",
+     "2222UUB6"
+    ],
+    [
+     "double-2222UUB4",
+     "2222UUB3"
+    ],
+    [
+     "double-2222UUB4",
+     "2222UUB5"
+    ]
+   ]
+  },
+  "2026-10-06_164436_noms_4e3b080321fa.json": {
+   "groupes_faits": [
+    "2222UUB7",
+    "2222UUB9"
+   ],
+   "essai_fait": true,
+   "en_suspens": []
+  },
+  "2026-10-06_164437_fonds_80559cfd1e18.json": {
+   "groupes_faits": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8"
+   ],
+   "essai_fait": true,
+   "en_suspens": []
+  }
+ },
+ "suivi": {
+  "doublons.toml": [
+   {
+    "cles": [
+     "2222UUB3",
+     "2222UUB4"
+    ],
+    "classe": "sûr",
+    "decision": "fusionner",
+    "conserver": "",
+    "raison": "",
+    "forcer": {}
+   },
+   {
+    "cles": [
+     "2222UUB8",
+     "2222UUB9"
+    ],
+    "classe": "à juger",
+    "decision": "distinct",
+    "conserver": "",
+    "raison": "éditions différentes",
+    "forcer": {}
+   }
+  ],
+  "pieces.toml": [
+   {
+    "copies": [
+     "2222UUBA",
+     "2222UUBB"
+    ],
+    "decision": "appliquer",
+    "corbeille": [
+     "2222UUBB"
+    ],
+    "rattacher": {},
+    "raison": ""
+   },
+   {
+    "copies": [
+     "2222UUBC",
+     "2222UUBD"
+    ],
+    "decision": "appliquer",
+    "corbeille": [
+     "2222UUBD"
+    ],
+    "rattacher": {},
+    "raison": ""
+   },
+   {
+    "copies": [
+     "2222UUBE",
+     "2222UUBF"
+    ],
+    "decision": "garder",
+    "corbeille": [],
+    "rattacher": {},
+    "raison": "chapitre et livre entier"
+   },
+   {
+    "copies": [
+     "2222UUBG",
+     "2222UUBH"
+    ],
+    "decision": "appliquer",
+    "corbeille": [
+     "2222UUBG"
+    ],
+    "rattacher": {
+     "2222UUBH": "2222UUB8"
+    },
+    "raison": ""
+   }
+  ],
+  "metadonnees.toml": [
+   {
+    "cle": "2222UUB4",
+    "sous_etape": "identifiants",
+    "probleme": "doi_inconnu",
+    "decision": "refuser",
+    "choix": 1,
+    "forcer": {},
+    "classe": "douteux",
+    "propositions": [
+     {
+      "champs": {
+       "DOI": ""
+      },
+      "source": "",
+      "note": "retirer le DOI, que ni doi.org ni les sources ne connaissent",
+      "avis": ""
+     },
+     {
+      "champs": {
+       "DOI": "10.1111/situe"
+      },
+      "source": "crossref",
+      "note": "crossref : « Situated learning in communities of practice », Martin, 2001, Article de revue (similarité 1.00)",
+      "avis": "année"
+     }
+    ]
+   }
+  ],
+  "fonds.toml": {
+   "collection": [
+    {
+     "cle": "2222UUBE",
+     "chemin": "20 Cours/Psy L1",
+     "effectif": 1,
+     "sort": "projet",
+     "cible": "20 Cours/Psy L1",
+     "candidats": [],
+     "note": ""
+    },
+    {
+     "cle": "2222UUBB",
+     "chemin": "40 Fonds/Arts",
+     "effectif": 1,
+     "sort": "thème",
+     "cible": "Arts",
+     "candidats": [],
+     "note": ""
+    },
+    {
+     "cle": "2222UUBC",
+     "chemin": "40 Fonds/Arts/Musées",
+     "effectif": 1,
+     "sort": "thème",
+     "cible": "Arts",
+     "candidats": [],
+     "note": ""
+    },
+    {
+     "cle": "2222UUB8",
+     "chemin": "40 Fonds/Psychologie",
+     "effectif": 0,
+     "sort": "thème",
+     "cible": "Psychologie",
+     "candidats": [],
+     "note": ""
+    },
+    {
+     "cle": "2222UUB9",
+     "chemin": "40 Fonds/Psychologie/Perception",
+     "effectif": 3,
+     "sort": "répartir",
+     "cible": "",
+     "candidats": [
+      "Psychologie/Perception",
+      "Psychologie/Perception/Apprentissage perceptif"
+     ],
+     "note": ""
+    },
+    {
+     "cle": "2222UUBA",
+     "chemin": "40 Fonds/Psychologie/Émotions",
+     "effectif": 1,
+     "sort": "thème",
+     "cible": "Psychologie/Émotion",
+     "candidats": [],
+     "note": ""
+    },
+    {
+     "cle": "2222UUB7",
+     "chemin": "Vieux",
+     "effectif": 1,
+     "sort": "dissoudre",
+     "cible": "",
+     "candidats": [],
+     "note": "plus utilisée"
+    },
+    {
+     "cle": "2222UUBD",
+     "chemin": "Vieux/Cours ancien",
+     "effectif": 1,
+     "sort": "archives",
+     "cible": "",
+     "candidats": [],
+     "note": ""
+    }
+   ],
+   "racines": {
+    "20 Cours": "Cours",
+    "40 Fonds": "Fonds",
+    "80 Archives": "Archives"
+   },
+   "tags": {
+    "apprentissage visuel": "Psychologie/Perception/Apprentissage perceptif"
+   }
+  },
+  "rangement.toml": [
+   {
+    "cle": "2222UUBF",
+    "action": "déplacer",
+    "cible": "Psychologie/Perception/Apprentissage perceptif",
+    "depuis": "",
+    "source": "agent",
+    "decision": "accepter",
+    "note": ""
+   },
+   {
+    "cle": "2222UUBL",
+    "action": "corbeille",
+    "cible": "",
+    "depuis": "",
+    "source": "consigne",
+    "decision": "accepter",
+    "note": ""
+   },
+   {
+    "cle": "2222UUBG",
+    "action": "ajouter",
+    "cible": "Psychologie/Perception",
+    "depuis": "",
+    "source": "agent",
+    "decision": "refuser",
+    "note": "reste aussi dans Perception"
+   },
+   {
+    "cle": "2222UUBH",
+    "action": "déplacer",
+    "cible": "Psychologie/Perception/Apprentissage perceptif",
+    "depuis": "2222UUB9",
+    "source": "tag",
+    "decision": "accepter",
+    "note": "tag « apprentissage visuel »"
+   }
+  ],
+  "tags.toml": {
+   "automatiques": "accepter",
+   "importes": "accepter",
+   "resume_automatiques": "5 noms automatique(s), 10 occurrence(s). La règle en retire 2 nom(s) et 3 occurrence(s), les exceptions sont dans les [[tag]] et [[variantes]] en attente.",
+   "resume_importes": "1 fiche porte(nt) plus de 8 tags manuels hors familles, rares pour la plupart (mots-clés importés). 10 nom(s) et 10 occurrence(s) retirés si la règle est acceptée.",
+   "tag": [
+    {
+     "nom": "Attention",
+     "type": "automatique",
+     "effectif": 5,
+     "dispersion": 2,
+     "themes": [
+      "Psychologie/Émotion",
+      "Psychologie/Perception"
+     ],
+     "theme": "",
+     "recherches": [],
+     "sort": "concept",
+     "cible": "#attention",
+     "source": "zc",
+     "classe": "douteux",
+     "decision": "accepter",
+     "note": "réparti sur 2 thèmes du fonds, nom à vérifier (minuscules sauf nom propre, dans la langue de l'utilisateur) et définition à proposer",
+     "variantes": []
+    },
+    {
+     "nom": "émotion",
+     "type": "les deux",
+     "effectif": 3,
+     "dispersion": 1,
+     "themes": [
+      "Psychologie/Émotion"
+     ],
+     "theme": "Psychologie/Émotion",
+     "recherches": [],
+     "sort": "garder",
+     "cible": "",
+     "source": "zc",
+     "classe": "douteux",
+     "decision": "accepter",
+     "note": "double le thème, gardé",
+     "variantes": [
+      "Emotion",
+      "emotions"
+     ]
+    },
+    {
+     "nom": "machine learning",
+     "type": "manuel",
+     "effectif": 2,
+     "dispersion": 2,
+     "themes": [
+      "Arts",
+      "Psychologie/Émotion"
+     ],
+     "theme": "",
+     "recherches": [],
+     "sort": "concept",
+     "cible": "#machine learning",
+     "source": "zc",
+     "classe": "douteux",
+     "decision": "accepter",
+     "note": "réparti sur 2 thèmes du fonds, nom à vérifier (minuscules sauf nom propre, dans la langue de l'utilisateur) et définition à proposer",
+     "variantes": []
+    },
+    {
+     "nom": "mémoire",
+     "type": "manuel",
+     "effectif": 2,
+     "dispersion": 2,
+     "themes": [
+      "Psychologie/Émotion",
+      "Psychologie/Perception"
+     ],
+     "theme": "",
+     "recherches": [],
+     "sort": "concept",
+     "cible": "#mémoire",
+     "source": "zc",
+     "classe": "douteux",
+     "decision": "refuser",
+     "note": "réparti sur 2 thèmes du fonds, nom à vérifier (minuscules sauf nom propre, dans la langue de l'utilisateur) et définition à proposer",
+     "variantes": []
+    },
+    {
+     "nom": "perception visuelle",
+     "type": "manuel",
+     "effectif": 2,
+     "dispersion": 1,
+     "themes": [
+      "Psychologie/Perception"
+     ],
+     "theme": "Psychologie/Perception",
+     "recherches": [],
+     "sort": "supprimer",
+     "cible": "",
+     "source": "zc",
+     "classe": "douteux",
+     "decision": "accepter",
+     "note": "concentré dans le thème « Psychologie/Perception », il le double",
+     "variantes": []
+    },
+    {
+     "nom": "to read",
+     "type": "manuel",
+     "effectif": 2,
+     "dispersion": 1,
+     "themes": [
+      "Psychologie/Perception"
+     ],
+     "theme": "",
+     "recherches": [],
+     "sort": "état",
+     "cible": "1 à lire",
+     "source": "zc",
+     "classe": "douteux",
+     "decision": "accepter",
+     "note": "état ou marque venu d'une autre habitude, à confirmer",
+     "variantes": []
+    },
+    {
+     "nom": "truc divers",
+     "type": "manuel",
+     "effectif": 1,
+     "dispersion": 1,
+     "themes": [
+      "Arts"
+     ],
+     "theme": "",
+     "recherches": [],
+     "sort": "supprimer",
+     "cible": "",
+     "source": "zc",
+     "classe": "évident",
+     "decision": "accepter",
+     "note": "porté par une seule fiche, sans ressemblance avec un concept ou un thème",
+     "variantes": []
+    },
+    {
+     "nom": "Vision",
+     "type": "automatique",
+     "effectif": 1,
+     "dispersion": 1,
+     "themes": [
+      "Psychologie/Perception"
+     ],
+     "theme": "",
+     "recherches": [
+      "Vision"
+     ],
+     "sort": "supprimer",
+     "cible": "",
+     "source": "zc",
+     "classe": "douteux",
+     "decision": "accepter",
+     "note": "la règle globale le retirerait sans cette exception. cité par une recherche enregistrée",
+     "variantes": []
+    }
+   ],
+   "variantes": [
+    {
+     "noms": [
+      "Machine-Learning",
+      "machine learning"
+     ],
+     "cible": "machine learning",
+     "classe": "évident",
+     "source": "zc",
+     "decision": "accepter",
+     "note": ""
+    }
+   ]
+  },
+  "cles.toml": {
+   "double": [
+    {
+     "fiches": [
+      "2222UUB3",
+      "2222UUB4",
+      "2222UUB5"
+     ],
+     "garde": "2222UUB4",
+     "decision": "",
+     "raison": "décidé pour les fixtures"
+    },
+    {
+     "fiches": [
+      "2222UUB9",
+      "2222UUBA"
+     ],
+     "garde": "",
+     "decision": "écarter",
+     "raison": "décidé pour les fixtures"
+    }
+   ],
+   "extra": [
+    {
+     "fiche": "2222UUB8",
+     "decision": "natif",
+     "raison": "décidé pour les fixtures"
+    }
+   ]
+  },
+  "rangement-examinees.json": {
+   "2222UUB9": [
+    "2222UUBF",
+    "2222UUBG",
+    "2222UUBH"
+   ]
+  },
+  "rangement-laissees.json": [
+   "2222UUBN"
+  ],
+  "fonds-validation.json": {
+   "empreinte": "adec3423f0fb9e698734868069058cb8c6f00350e09d85a603301a2796d6bfe8",
+   "deja_valide": true,
+   "erreurs": [],
+   "changements": [],
+   "a_jour": [
+    true,
+    []
+   ]
+  },
+  "fonds-collections.json": {
+   "2222UUBB": "Arts",
+   "2222UUB8": "Psychologie",
+   "2222UUB9": "Psychologie/Perception"
+  },
+  "audits": {
+   "jour": "2026-10-06",
+   "instantane": {
+    "chiffres": {
+     "référence": 9,
+     "pièce jointe": 0,
+     "note": 0,
+     "collection": 12
+    },
+    "points": {
+     "Chiffres d'ensemble": [],
+     "Références sans collection": [
+      "2222UUBN"
+     ],
+     "Doublons probables": [],
+     "Métadonnées manquantes": [
+      "article sans DOI · 2222UUBF",
+      "article sans DOI · 2222UUBG",
+      "article sans DOI · 2222UUBH",
+      "article sans DOI · 2222UUBI",
+      "article sans DOI · 2222UUBJ",
+      "article sans DOI · 2222UUBK",
+      "article sans DOI · 2222UUBL",
+      "article sans DOI · 2222UUBM",
+      "article sans DOI · 2222UUBN"
+     ],
+     "Fichiers absents": [],
+     "PDF identiques": [],
+     "Tags": [
+      "hors familles · apprentissage visuel"
+     ],
+     "Clés de citation": [
+      "sans clé · 2222UUBF",
+      "sans clé · 2222UUBG",
+      "sans clé · 2222UUBH",
+      "sans clé · 2222UUBI",
+      "sans clé · 2222UUBJ",
+      "sans clé · 2222UUBK",
+      "sans clé · 2222UUBL",
+      "sans clé · 2222UUBM",
+      "sans clé · 2222UUBN"
+     ],
+     "Noms des fichiers": [],
+     "Structure des collections": [
+      "racine · Vieux",
+      "vide · 80 Archives"
+     ],
+     "Synchronisation": [],
+     "Plan du fonds": [
+      "hors fonds · 2222UUBK",
+      "hors fonds · 2222UUBM",
+      "à créer · Psychologie/Perception/Apprentissage perceptif",
+      "à créer · Psychologie/Émotion"
+     ]
+    }
+   }
+  }
+ },
+ "configs": {
+  "ancienne": {
+   "zotero": {
+    "dossier": "/zotero-factice/Zotero"
+   },
+   "methode": {
+    "inbox": "Inbox",
+    "projets": [
+     "10 Projets"
+    ],
+    "fonds": "Fonds",
+    "archives": "Archives",
+    "etats": [
+     "à lire",
+     "lu"
+    ],
+    "autres_tags": [
+     "★ essentiel",
+     "papier"
+    ],
+    "couleurs": [
+     "#FF6666",
+     "#FF8C19",
+     "#5FB236",
+     "#FFD400",
+     "#A28AE5"
+    ],
+    "prefixe_concept": "#",
+    "prefixe_technique": "_",
+    "seuil_sous_theme": 40,
+    "profondeur_max": 3,
+    "conjonction": "",
+    "cles_citation": true
+   },
+   "ecriture": {
+    "essai": 5,
+    "petit_plan_de_gestion": 50
+   },
+   "sauvegarde": {
+    "dossier": "/sauvegardes-factices",
+    "delai_heures": 48,
+    "conserver": 3
+   },
+   "confidentialite": {
+    "tags_exclus": [
+     "_privé",
+     "_perso"
+    ],
+    "collections_exclues": [
+     "Fonds/Privé"
+    ],
+    "exclure_notes": false,
+    "exclure_texte_integral": false
+   },
+   "sources": {
+    "contact": "auteur@exemple.org",
+    "crossref": true,
+    "openalex": true,
+    "bnf": false,
+    "sudoc": true,
+    "openlibrary": true,
+    "debit": 3.0,
+    "plafond_openalex": 900
+   },
+   "metadonnees": {
+    "champs": [
+     "DOI",
+     "ISBN",
+     "ISSN",
+     "date",
+     "publicationTitle",
+     "bookTitle",
+     "proceedingsTitle",
+     "volume",
+     "issue",
+     "pages",
+     "publisher",
+     "place",
+     "language",
+     "creators",
+     "numPages",
+     "edition",
+     "series",
+     "seriesNumber"
+    ],
+    "exclus_par_type": {
+     "journalArticle": [
+      "publisher"
+     ],
+     "book": [
+      "series"
+     ]
+    },
+    "seuil_sur": 0.95,
+    "seuil_discordance": 0.8,
+    "ecart_annees": 1
+   },
+   "tags": {
+    "seuil_candidat": 5,
+    "seuil_mots_cles": 8,
+    "dispersion_concept": 2,
+    "proteges": [
+     "à garder"
+    ]
+   }
+  },
+  "init": {
+   "zotero": {
+    "dossier": "/zotero-factice/Zotero"
+   },
+   "methode": {
+    "inbox": "Inbox",
+    "projets": [
+     "Projets"
+    ],
+    "fonds": "Fonds",
+    "archives": "Archives",
+    "etats": [
+     "1 à lire",
+     "2 en cours",
+     "3 lu"
+    ],
+    "autres_tags": [
+     "★ essentiel",
+     "papier"
+    ],
+    "couleurs": [
+     "#FF6666",
+     "#FF8C19",
+     "#5FB236",
+     "#FFD400",
+     "#A28AE5"
+    ],
+    "prefixe_concept": "#",
+    "prefixe_technique": "_",
+    "seuil_sous_theme": 40,
+    "profondeur_max": 3,
+    "conjonction": "",
+    "cles_citation": true
+   },
+   "ecriture": {
+    "essai": 5,
+    "petit_plan_de_gestion": 50
+   },
+   "sauvegarde": {
+    "dossier": null,
+    "delai_heures": 24,
+    "conserver": 2
+   },
+   "confidentialite": {
+    "tags_exclus": [
+     "_privé"
+    ],
+    "collections_exclues": [],
+    "exclure_notes": false,
+    "exclure_texte_integral": false
+   },
+   "sources": {
+    "contact": "auteur@exemple.org",
+    "crossref": true,
+    "openalex": true,
+    "bnf": true,
+    "sudoc": true,
+    "openlibrary": true,
+    "debit": 3.0,
+    "plafond_openalex": 900
+   },
+   "metadonnees": {
+    "champs": [
+     "DOI",
+     "ISBN",
+     "ISSN",
+     "date",
+     "publicationTitle",
+     "bookTitle",
+     "proceedingsTitle",
+     "volume",
+     "issue",
+     "pages",
+     "publisher",
+     "place",
+     "language",
+     "creators",
+     "numPages",
+     "edition",
+     "series",
+     "seriesNumber"
+    ],
+    "exclus_par_type": {
+     "journalArticle": [
+      "publisher",
+      "place"
+     ]
+    },
+    "seuil_sur": 0.95,
+    "seuil_discordance": 0.8,
+    "ecart_annees": 1
+   },
+   "tags": {
+    "seuil_candidat": 5,
+    "seuil_mots_cles": 8,
+    "dispersion_concept": 2,
+    "proteges": []
+   }
+  },
+  "minimale": {
+   "zotero": {
+    "dossier": "/zotero-factice/Zotero"
+   },
+   "methode": {
+    "inbox": "Inbox",
+    "projets": [
+     "Projets"
+    ],
+    "fonds": "Fonds",
+    "archives": "Archives",
+    "etats": [
+     "1 à lire",
+     "2 en cours",
+     "3 lu"
+    ],
+    "autres_tags": [
+     "★ essentiel",
+     "papier"
+    ],
+    "couleurs": [
+     "#FF6666",
+     "#FF8C19",
+     "#5FB236",
+     "#FFD400",
+     "#A28AE5"
+    ],
+    "prefixe_concept": "#",
+    "prefixe_technique": "_",
+    "seuil_sous_theme": 40,
+    "profondeur_max": 3,
+    "conjonction": "",
+    "cles_citation": true
+   },
+   "ecriture": {
+    "essai": 5,
+    "petit_plan_de_gestion": 50
+   },
+   "sauvegarde": {
+    "dossier": null,
+    "delai_heures": 24,
+    "conserver": 2
+   },
+   "confidentialite": {
+    "tags_exclus": [
+     "_privé"
+    ],
+    "collections_exclues": [],
+    "exclure_notes": false,
+    "exclure_texte_integral": false
+   },
+   "sources": {
+    "contact": "",
+    "crossref": true,
+    "openalex": true,
+    "bnf": true,
+    "sudoc": true,
+    "openlibrary": true,
+    "debit": 3.0,
+    "plafond_openalex": 900
+   },
+   "metadonnees": {
+    "champs": [
+     "DOI",
+     "ISBN",
+     "ISSN",
+     "date",
+     "publicationTitle",
+     "bookTitle",
+     "proceedingsTitle",
+     "volume",
+     "issue",
+     "pages",
+     "publisher",
+     "place",
+     "language",
+     "creators",
+     "numPages",
+     "edition",
+     "series",
+     "seriesNumber"
+    ],
+    "exclus_par_type": {
+     "journalArticle": [
+      "publisher",
+      "place"
+     ]
+    },
+    "seuil_sur": 0.95,
+    "seuil_discordance": 0.8,
+    "ecart_annees": 1
+   },
+   "tags": {
+    "seuil_candidat": 5,
+    "seuil_mots_cles": 8,
+    "dispersion_concept": 2,
+    "proteges": []
+   }
+  },
+  "dossier": {
+   "zotero": {
+    "dossier": "/zotero-factice/Zotero"
+   },
+   "methode": {
+    "inbox": "Inbox",
+    "projets": [
+     "20 Cours"
+    ],
+    "fonds": "40 Fonds",
+    "archives": "80 Archives",
+    "etats": [
+     "1 à lire",
+     "2 en cours",
+     "3 lu"
+    ],
+    "autres_tags": [
+     "★ essentiel",
+     "papier"
+    ],
+    "couleurs": [
+     "#FF6666",
+     "#FF8C19",
+     "#5FB236",
+     "#FFD400",
+     "#A28AE5"
+    ],
+    "prefixe_concept": "#",
+    "prefixe_technique": "_",
+    "seuil_sous_theme": 40,
+    "profondeur_max": 3,
+    "conjonction": "",
+    "cles_citation": true
+   },
+   "ecriture": {
+    "essai": 5,
+    "petit_plan_de_gestion": 50
+   },
+   "sauvegarde": {
+    "dossier": null,
+    "delai_heures": 24,
+    "conserver": 2
+   },
+   "confidentialite": {
+    "tags_exclus": [
+     "_privé"
+    ],
+    "collections_exclues": [],
+    "exclure_notes": false,
+    "exclure_texte_integral": false
+   },
+   "sources": {
+    "contact": "",
+    "crossref": true,
+    "openalex": true,
+    "bnf": true,
+    "sudoc": true,
+    "openlibrary": true,
+    "debit": 3.0,
+    "plafond_openalex": 900
+   },
+   "metadonnees": {
+    "champs": [
+     "DOI",
+     "ISBN",
+     "ISSN",
+     "date",
+     "publicationTitle",
+     "bookTitle",
+     "proceedingsTitle",
+     "volume",
+     "issue",
+     "pages",
+     "publisher",
+     "place",
+     "language",
+     "creators",
+     "numPages",
+     "edition",
+     "series",
+     "seriesNumber"
+    ],
+    "exclus_par_type": {
+     "journalArticle": [
+      "publisher",
+      "place"
+     ]
+    },
+    "seuil_sur": 0.95,
+    "seuil_discordance": 0.8,
+    "ecart_annees": 1
+   },
+   "tags": {
+    "seuil_candidat": 5,
+    "seuil_mots_cles": 8,
+    "dispersion_concept": 2,
+    "proteges": []
+   }
+  }
+ },
+ "sauvegardes": [
+  {
+   "dossier": "2026-10-06_164437",
+   "date": "2026-10-06T16:44:37+02:00",
+   "methode": "clone",
+   "version_bibliotheque": 121,
+   "taille": 647168,
+   "dossier_zotero": "/zotero-factice/Zotero"
+  }
+ ],
+ "cache": {
+  "crossref.json": {
+   "doi:10.1111/color": {
+    "source": "crossref",
+    "doi": "10.1111/color",
+    "type": "journalArticle",
+    "titre": "Acquisition of categorical color perception",
+    "date": "2002-08-01",
+    "auteurs": [
+     [
+      "Özgen",
+      "Emre"
+     ]
+    ],
+    "editeurs_scientifiques": [],
+    "conteneur": "",
+    "volume": "",
+    "numero": "",
+    "pages": "",
+    "editeur": "",
+    "lieu": "",
+    "issn": [],
+    "isbn": [],
+    "langue": "",
+    "resume": "",
+    "traducteurs": [],
+    "nb_pages": "",
+    "edition": "",
+    "collection": "",
+    "numero_collection": "",
+    "nb_editions": 0
+   },
+   "doi:10.1111/inexistant": null,
+   "q:situated learning in communities of practice|martin|1991": [
+    {
+     "source": "crossref",
+     "doi": "10.1111/situe",
+     "type": "journalArticle",
+     "titre": "Situated learning in communities of practice",
+     "date": "2001-08-01",
+     "auteurs": [
+      [
+       "Martin",
+       "Claire"
+      ]
+     ],
+     "editeurs_scientifiques": [],
+     "conteneur": "",
+     "volume": "",
+     "numero": "",
+     "pages": "",
+     "editeur": "",
+     "lieu": "",
+     "issn": [],
+     "isbn": [],
+     "langue": "",
+     "resume": "",
+     "traducteurs": [],
+     "nb_pages": "",
+     "edition": "",
+     "collection": "",
+     "numero_collection": "",
+     "nb_editions": 0
+    }
+   ],
+   "doi:10.1111/ch": {
+    "source": "crossref",
+    "doi": "10.1111/ch",
+    "type": "bookSection",
+    "titre": "Perception and action in the embodied mind",
+    "date": "2015-08-01",
+    "auteurs": [
+     [
+      "Petit",
+      "Anne"
+     ]
+    ],
+    "editeurs_scientifiques": [],
+    "conteneur": "",
+    "volume": "",
+    "numero": "",
+    "pages": "",
+    "editeur": "",
+    "lieu": "",
+    "issn": [],
+    "isbn": [],
+    "langue": "",
+    "resume": "",
+    "traducteurs": [],
+    "nb_pages": "",
+    "edition": "",
+    "collection": "",
+    "numero_collection": "",
+    "nb_editions": 0
+   },
+   "doi:10.1111/vol": {
+    "source": "crossref",
+    "doi": "10.1111/vol",
+    "type": "journalArticle",
+    "titre": "Categorical perception of colour in the left and right visual field",
+    "date": "2007-08-01",
+    "auteurs": [
+     [
+      "Drivonikou",
+      "Gilda"
+     ]
+    ],
+    "editeurs_scientifiques": [],
+    "conteneur": "PNAS",
+    "volume": "104",
+    "numero": "3",
+    "pages": "1097-1102",
+    "editeur": "",
+    "lieu": "",
+    "issn": [],
+    "isbn": [],
+    "langue": "",
+    "resume": "",
+    "traducteurs": [],
+    "nb_pages": "",
+    "edition": "",
+    "collection": "",
+    "numero_collection": "",
+    "nb_editions": 0
+   }
+  },
+  "doi.json": {
+   "doi:10.1111/inexistant": false
+  },
+  "openalex.json": {
+   "doi:10.1111/inexistant": null
+  }
+ }
+}

@@ -1,0 +1,35 @@
+# Doublons repérés par `zc doublons chercher`, avec les décisions prises.
+# Ce fichier se relit et se modifie à la main ou avec l'agent. `zc doublons chercher` le met à jour
+# sans perdre les décisions, `zc doublons planifier` prépare la fusion des groupes à fusionner.
+# Les décisions s'écrivent avec `zc doublons accepter` (fusionner, --conserver) et `zc doublons refuser` (distinct).
+#
+# decision  : "fusionner", "distinct" (éditions ou textes différents, à ne plus signaler) ou "" (à juger).
+# conserver : clé de la fiche à garder (facultatif, sinon celle qui a le plus de pièces jointes, puis la plus ancienne).
+# forcer    : valeurs imposées à la fiche gardée, par exemple { "date" = "1938" } (facultatif).
+# raison    : note libre, utile pour les groupes jugés distincts.
+#
+# Un groupe que `zc doublons chercher` n'a pas repéré s'ajoute à la fin du fichier, par exemple
+#   [[groupe]]
+#   cles = ["ABCD1234", "EFGH5678"]
+#   decision = "fusionner"
+# Il est gardé tant que ses fiches existent.
+
+[[groupe]]
+# 2222UUB3 · Durand · 2020 · Perceptual learning of categorical colour (Article de revue, 1 pièce(s) jointe(s))
+# 2222UUB4 · Durand · 2020 · Perceptual learning of categorical colour (Article de revue, 2 pièce(s) jointe(s))
+cles = ["2222UUB3", "2222UUB4"]
+classe = "sûr"
+decision = "fusionner"
+conserver = ""
+raison = ""
+forcer = {  }
+
+[[groupe]]
+# 2222UUB8 · Robin · 1938 · La morale antique (Livre, 0 pièce(s) jointe(s))
+# 2222UUB9 · Robin · 1963 · La morale antique, nouvelle édition (Livre, 0 pièce(s) jointe(s))
+cles = ["2222UUB8", "2222UUB9"]
+classe = "à juger"
+decision = "distinct"
+conserver = ""
+raison = "éditions différentes"
+forcer = {  }

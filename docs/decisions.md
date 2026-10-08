@@ -41,7 +41,7 @@ Options examinées.
 - Documentation et messages en français, code en anglais. Plus conventionnel, mais deux langues à tenir.
 - Tout en anglais avec une traduction française de la documentation. Public plus large, effort double.
 
-Décision. Tout en français. Une internationalisation pourra venir si des non-francophones s'y intéressent.
+Décision. Tout en français. Une internationalisation pourra venir si des non-francophones s'y intéressent. Révisée par D208.
 
 ### D5. Licence et titulaire des droits
 
@@ -295,6 +295,8 @@ Décision.
 - v0.3. Gestion (tri de l'Inbox, contrôle). L'outil sert au quotidien sur une vraie bibliothèque.
 - v0.4. Suggestions de textes manquants.
 - Plus tard. Production de notes et autres fonctions avancées, inventaire papier.
+
+Révisé par D243. Les suggestions de textes et la production de notes sortent du périmètre, et la version 0.4 est celle du passage à l'anglais (D218).
 
 ### D32. Consignation des décisions
 
@@ -1372,6 +1374,282 @@ Constat, signalé pendant D205 et vérifié dans le code de Zotero (`_saveData` 
 ### D207. Minuteur dans le terminal
 
 Constat de l'utilisateur, au premier audit de la version 0.3.1. Rien ne s'affiche pendant qu'une commande lit la bibliothèque, si bien qu'on ne sait pas si elle tourne. Décision, demandée par l'utilisateur. Sous un terminal, « zc audit en cours… 12 s » s'affiche dès le lancement sur la sortie d'erreur et se met à jour chaque seconde. Les messages de la commande effacent d'abord cette ligne, que le minuteur redessine ensuite. À la fin, une commande qui a duré au moins deux secondes affiche « zc audit terminé en 14 s. ». Rien ne change quand la sortie n'est pas un terminal, pour ne pas charger ce que lit un agent, ni pour `zc init`, qui pose des questions.
+
+## Passage à l'anglais
+
+Un autre agent a proposé le 06/10/2026 un plan de migration (`docs/plan_migration_anglais.md`), relu puis simplifié. Les décisions suivantes tranchent ses arbitrages.
+
+### D208. Motif et périmètre
+
+Options examinées.
+- Ouvrir l'outil à des collègues anglophones.
+- Viser une diffusion publique plus large, depuis GitHub.
+- Rendre le code plus facile à lire et à maintenir, y compris par des agents.
+
+Décision, motif donné par l'auteur. Diffusion publique plus large. Le code, les commentaires, les commandes et options, la documentation générique et les skills passent à l'anglais. Chaque bibliothèque est déclarée française ou anglaise à `zc init`, ce qui fixe la langue des conventions proposées (noms de classement, définitions), jamais celle des données bibliographiques. L'agent parle la langue de l'utilisateur et emploie toujours les commandes anglaises. Révise D4.
+
+### D209. Format des fichiers du dossier de travail
+
+Options examinées.
+- Un seul format, celui de la version 0.3.2, dont les clés françaises deviennent un protocole figé. Rien à convertir, une seule lecture à maintenir.
+- Deux dispositions en parallèle, l'ancienne pour les dossiers existants et une anglaise pour les nouveaux, avec des codecs pour chacune. Plus homogène pour les nouveaux dossiers, mais une double couche à porter indéfiniment pour un gain invisible de l'utilisateur.
+
+Décision. Un seul format. Plans, journaux, suivi, validation et config gardent leurs clés et leurs chemins, figés par des fixtures dorées produites par la version 0.3.2. L'empreinte d'un plan ne dépend plus des noms des champs Python, pour qu'un renommage du code ne puisse pas la changer.
+
+### D210. Langue des rapports
+
+Options examinées.
+- La langue de la bibliothèque. Un utilisateur francophone lit des rapports en français, au prix d'un catalogue de textes en deux langues.
+- Toujours l'anglais, seuls les noms du classement suivant la langue choisie. Une seule source, mais des rapports en anglais pour une bibliothèque française.
+
+Décision. La langue de la bibliothèque.
+
+### D211. Nom anglais du fonds
+
+Options examinées. `Subjects`, `Topics`, ou `Library` comme le proposait le plan, au risque de le confondre avec « My Library » et les bibliothèques de groupe de Zotero.
+
+Décision. `Subjects` dans le profil anglais. Le profil français garde `Fonds`.
+
+### D212. Langue de ce registre
+
+Options examinées.
+- Garder l'historique en français et écrire les nouvelles décisions en anglais. Aucun risque de déplacer le sens de ce qui fait foi.
+- Tout traduire. Un seul registre homogène, mais près de 1 400 lignes à reprendre sans en changer le sens.
+
+Décision. L'historique reste en français. Les décisions s'écrivent en anglais une fois la migration livrée.
+
+### D213. Anciennes commandes françaises
+
+Options examinées.
+- Les refuser en indiquant la commande équivalente.
+- Les garder comme alias cachés pendant une version.
+
+Décision. Refus avec la commande équivalente, par exemple « `zc doublons` s'appelle maintenant `zc duplicates` », pour qu'un agent ou un utilisateur habitué aux anciens noms retrouve son chemin.
+
+### D214. Bibliothèques existantes
+
+Options examinées.
+- Choix du français ou de l'anglais pour les nouveaux dossiers seulement, les dossiers existants restant français, et conversion du classement reportée à un chantier distinct.
+- Inclure tout de suite une conversion réversible des collections, tags, couleurs, recherches et exclusions.
+
+Décision, recommandation du plan retenue. Le choix vaut pour les nouveaux dossiers. Un dossier existant sans langue déclarée est français. Une conversion du classement d'une langue à l'autre passerait par des plans du socle, et fera l'objet d'un chantier distinct si le besoin apparaît.
+
+### D215. Langue des messages de zc
+
+Options examinées.
+- La langue de la bibliothèque, comme les rapports (D210). Un utilisateur lit souvent un refus sans passer par l'agent.
+- Toujours l'anglais, l'agent traduisant au besoin.
+
+Décision. Refus, erreurs, avancement et minuteur suivent la langue de la bibliothèque, par les mêmes textes bilingues que les rapports. L'aide `--help` et les erreurs de syntaxe d'argparse restent en anglais, puisqu'elles décrivent des commandes anglaises et surviennent avant la lecture de la configuration.
+
+### D216. Guide, méthode et consignes de l'agent
+
+Options examinées.
+- Guide et méthode en français et en anglais, `zc init` copiant la version de la langue choisie, tandis que les skills et le `AGENTS.md` livré, lus par l'agent, n'existent qu'en anglais.
+- Tout en anglais.
+
+Décision. La première option. L'utilisateur lit le guide et la méthode dans la langue de sa bibliothèque.
+
+### D217. Nom de la commande du fonds
+
+Options examinées. `zc subjects`, en accord avec D211, ou `zc classification`, comme le proposait le plan.
+
+Décision. `zc subjects`, avec ses sous-commandes en anglais (`inventory`, `validate`…).
+
+### D218. Version de livraison
+
+Options examinées. 0.4.0, puisque toutes les commandes changent, ou 1.0, pour marquer l'ouverture au public.
+
+Décision. 0.4.0.
+
+### D219. Noms anglais des commandes
+
+Douze questions posées le 06/10/2026 sur les noms que D208 à D218 laissaient ouverts, chacune avec deux ou trois options.
+- Dossier de travail, `--workspace` (explicite, déjà proposé par le premier plan), `--dir` ou `--folder`.
+- PDF identiques, `attachments` (terme de Zotero), `pdfs` ou `copies`.
+- Clés de citation, `citation-keys` (nom du champ dans Zotero) ou `citekeys` (plus court, habituel chez Better BibTeX).
+- Journal, `journal` inchangé, comme le dossier `journal/` que D209 garde, ou `log`.
+- Essai, `--trial`, `--test` ou `--first`.
+- Report dans `plan.md` des gestes faits dans Zotero, `track`, `sync` (confusion possible avec la synchronisation de Zotero) ou `update`.
+- Fiches à ranger, `pending`, `to-file` ou `to-place`.
+- Groupes sûrs et cas évidents, `--certain` et `--obvious`, `--safe` et `--clear`, ou `--sure` et `--evident`.
+- Sort d'un tag, `--action`, `--fate` ou `--rule`, et « état » rendu par `status` ou `state`.
+- « Écarter » une clé de citation, `skip`, `dismiss` ou `ignore`.
+- Collections examinées et fiches laissées hors du fonds, `--reviewed` et `--leave-out`, ou `--done` et `--skip`.
+- Copie à rattacher à une autre fiche, `--move`, `--reattach` ou `--attach-to`.
+
+Décision. Les recommandations, toutes retenues par l'auteur. `--dossier` devient `--workspace` et `--dossier-zotero` `--zotero-dir`, `zc pieces` devient `zc attachments`, `zc cles` `zc citation-keys`, `zc journal` reste tel quel, `--essai` devient `--trial`, `zc fonds suivre` `zc subjects track`, `zc fonds a-ranger` `zc subjects pending`, `--surs` et `--evidents` deviennent `--certain` et `--obvious`, `--sort` devient `--action` (valeurs `delete`, `keep`, `concept`, `status`, `merge`), « écarter » devient `skip` (avec `keep`, `native`, `extra`), `--examinees` et `--laisser` deviennent `--reviewed` et `--leave-out`, `--rattacher` devient `--move`. Les noms sans question suivent le registre (`backup`, `show`, `filenames`, `metadata`, `find`, `plan`, `accept`, `reject`, `identifiers`, `complete`, `prepare`, `titles`, `add`, `decide`, `--no-hashes`, `--offline`, `--except`, `--keep`, `--reason`, `--trash`, `--refresh`, `--save`, `--abstract`, `--roots`, `--variants`, `--automatic-rule`, `--imported-rule`, `--target`, `--user`). L'ensemble est consigné dans `src/zot_clean/registre.py`, qui fait foi pour le refus des anciens noms (D213) et le contrôle des commandes citées dans les documents. Une valeur anglaise donnée en option se traduit vers le mot stocké dans les fichiers, qui ne change pas (D209).
+
+### D220. Textes bilingues
+
+Questions posées le 07/10/2026 avant la phase 2, chacune avec ses options. Ici, comment le code connaît la langue d'un texte.
+
+Options examinées.
+- Une variable de contexte, réglée une fois par commande. `L(en='…', fr='…')` rend aussitôt le texte dans la langue courante, sans toucher aux signatures.
+- Passer la configuration ou la langue jusqu'à chaque message, ce qui touche des centaines de fonctions.
+
+Décision, recommandation retenue. Module `lang.py`, avec `L`, `language('en')` (bloc qui change la langue, pour les tests) et une variable de contexte. `cli.run_command` règle la langue dès qu'il connaît le dossier de travail, dans un bloc qui ne déborde pas sur la commande suivante. Le code appelé directement, comme dans les tests, est en français. Les clés et valeurs stockées ne passent jamais par `L` (D209).
+
+### D221. Clé de la langue dans config.toml
+
+Options examinées. `[methode] langue`, à côté des autres conventions que la langue fixe aussi (phase 3), une nouvelle section `[bibliotheque]`, ou une clé en tête de fichier, hors section.
+
+Décision, recommandation retenue. `[methode] langue = "fr"` ou `"en"`, en français comme le reste du fichier (D209). Absente, elle vaut `fr` (D214). Toute autre valeur est refusée. La langue est lue à part (`lang.of_workspace`), pour que le refus d'une configuration fautive soit déjà dans la bonne langue. Les fixtures de la 0.3.2 restent lues comme avant, la nouvelle clé y prenant sa valeur par défaut.
+
+### D222. Langue hors d'un dossier de travail
+
+Options examinées. L'anglais, comme l'aide et les erreurs d'argparse (D215), ou les deux langues à la suite.
+
+Décision, recommandation retenue. L'anglais, pour les quelques messages émis avant qu'un dossier de travail soit connu (aucun dossier ici, `zc init` avant le choix de la langue).
+
+### D223. Pluriels
+
+Options examinées. Une fonction commune d'accord, ou un accord laissé à chaque module.
+
+Décision, recommandation retenue. `lang.plural(n, en='attachment', fr='pièce jointe')`. En français, chaque mot s'accorde au-delà de 1, sauf les sigles, comme `audit.plural`. En anglais, le dernier mot s'accorde sauf pour 1, et `en_plural` donne un pluriel irrégulier.
+
+### D224. Tests des deux langues
+
+Options examinées. Un test en anglais par module, les tests existants restant en français, ou toute la suite dans les deux langues, deux fois plus longue et contraire aux assertions sur les textes français.
+
+Décision, recommandation retenue. Les tests existants restent en français. Chaque module ajoute au moins un test en anglais sur un rapport ou un message. `tests/test_lang.py` vérifie que chaque appel `L(...)` du paquet a ses deux textes, écrits sur place, non vides, avec les mêmes champs.
+
+### D225. Instantané de l'audit
+
+Options examinées. Garder la comparaison des audits par titre de section (D139), ou passer à des identifiants de section indépendants de la langue, ce qui changerait le format des instantanés déjà écrits.
+
+Décision, recommandation retenue. La comparaison par titre reste. Une bibliothèque ne change pas de langue (D214), ses instantanés restent donc comparables entre eux. Les titres français ne changent pas.
+
+### D226. Organisation de la phase 2
+
+Options examinées. Trois lots en parallèle, le lot A (commandes, refus des anciens noms, `zc init`) sur Opus et les lots B et C (textes) sur Sonnet, ou les trois sur Sonnet, ou un lot à la fois.
+
+Décision, recommandation retenue. Trois lots en parallèle dans des worktrees séparés, A sur Opus, B et C sur Sonnet, après un socle commun (D220 à D224) écrit sur la branche principale. Chaque fichier appartient à un seul lot, y compris les en-têtes de `suivi/` qu'il contient. Seul le lot A change, dans tous les tests, les lignes de commande passées à `cli.main`. Les lots s'intègrent l'un après l'autre.
+
+### D227. Profils de méthode
+
+Questions posées le 07/10/2026 avant la phase 3, chacune avec ses options. Ici, les noms du profil anglais et la façon dont un dossier les reçoit.
+
+Options examinées.
+- Noms anglais `Inbox`, `Projects`, `Subjects`, `Archives`, états `1 to read`, `2 reading`, `3 read`, marques `★ essential` et `printed`, exclusion `_private`. Ou `2 in progress` et `paper`, ce dernier pouvant se lire « article ».
+- Une table `PROFILES` dans `config.py`, qui complète les clés absentes d'après la langue de la bibliothèque, ou des défauts du code restés français, `zc init` écrivant tout en clair.
+
+Décision, recommandations retenues. Les premiers noms, et la table `PROFILES`. Rôles, couleurs, seuils, préfixes et protections sont communs aux deux profils. `config.load` lit d'abord `[methode] langue`, puis complète chaque clé absente par le nom du profil de cette langue, si bien qu'un dossier existant, français, lit exactement les mêmes valeurs. Un nouveau dossier écrit en clair les noms de son profil (racines, états, marques, tags exclus) au lieu de dépendre des défauts.
+
+### D228. Inclut et Includes dans plan.md
+
+Options examinées. Accepter `Includes` et `Excludes` dans les deux langues, ou seulement dans une bibliothèque anglaise.
+
+Décision, recommandation retenue par défaut (question laissée sans réponse). Les deux formes sont lues quelle que soit la langue, ce qui ne peut rien casser. Ce que `zc` réécrit d'un `plan.md` (rapport du contrôle) suit la langue de la bibliothèque.
+
+### D229. Guide et méthode en deux versions
+
+Options examinées. Des modèles rangés par langue (`templates/fr/guide.md` et `methode.md`, `templates/en/guide.md` et `method.md`), ou les mêmes noms de fichiers dans les deux langues.
+
+Décision, recommandation retenue. Les modèles par langue. Un dossier français garde `guide.md` et `methode.md`, un dossier anglais reçoit `guide.md` et `method.md`, et le commentaire de `config.toml` cite le bon nom. La version française du guide et de la méthode passe aux commandes anglaises, comme partout (D208).
+
+### D230. Noms des skills et retrait des anciens
+
+Options examinées.
+- Des noms calqués sur les commandes (`duplicates`, `metadata`, `subjects`, `citation-keys`, `filenames`, `checkup`, `inbox` et `tags` inchangés), ou des noms décrivant la tâche (`merge-duplicates`…).
+- Retirer à `zc init --update` les skills livrés sous un ancien nom, ou seulement prévenir.
+
+Décision, recommandations retenues. Les noms des commandes. `zc init --update` retire de `.agents/skills/` et `.claude/skills/` les six anciens noms livrés (`doublons`, `metadonnees`, `fonds`, `cles`, `noms`, `controle`), pour que l'agent ne suive pas deux jeux de consignes. Seul le `SKILL.md` écrit par `zc` est supprimé, puis le dossier s'il est vide. Un skill de l'utilisateur, ou un fichier ajouté dans un ancien dossier, reste.
+
+### D231. Contrôle des commandes citées
+
+Options examinées. Passer chaque commande citée au vrai analyseur d'arguments de `zc`, options comprises, ou ne contrôler que les noms des commandes et sous-commandes.
+
+Décision, recommandation retenue. `tests/test_cited_commands.py` extrait chaque `` `zc …` `` cité entre accents graves dans les skills, le `AGENTS.md` livré, le guide, la méthode, le README et les chaînes du paquet (textes des deux langues et docstrings). Les valeurs à remplir sont remplacées (`<plan>` par une valeur fictive, `keep|skip` par le premier choix, `…` retiré). Une commande ou une option citée sans ses valeurs obligatoires est admise, un nom inconnu ou un ancien nom de la 0.3.2 ne l'est pas.
+
+### D232. README
+
+Options examinées. Un README anglais avec un lien vers le guide français, ou un README anglais et un `README.fr.md`.
+
+Décision, recommandation retenue. Le README est en anglais, avec en tête un lien vers le guide français.
+
+### D233. Organisation de la phase 3
+
+Options examinées. Le code d'abord sur la branche principale, puis deux lots de documents en parallèle, ou tout d'un seul agent.
+
+Décision, recommandation retenue. Le code (profils, `zc init`, retrait des anciens skills, `Includes`) et le contrôle des commandes citées d'abord, sur Opus. Puis deux lots sur Sonnet dans des worktrees séparés, le lot D pour les skills et le `AGENTS.md` livré, le lot E pour le guide, la méthode et le README. Les skills et le `AGENTS.md` livré demandent à l'agent de lire la langue de la bibliothèque par `zc config show` et de parler celle de l'utilisateur.
+
+### D234. CI de la phase 4
+
+Questions posées le 07/10/2026 avant la phase 4, chacune avec ses options, toutes tranchées par « tout recommandé ». Ici, comment faire tourner la CI sur les trois systèmes.
+
+Options examinées. Pousser `main` sur le dépôt privé de l'atelier et suivre la CI, ou ne rien pousser et tester en local seulement.
+
+Décision, recommandation retenue. `main` est poussé sur le dépôt privé `zot-clean-atelier`, jamais sur le dépôt public, et la CI (macOS, Windows, Linux, Python 3.11 et 3.13) est suivie jusqu'au vert.
+
+### D235. Installation propre
+
+Décision, recommandation retenue. Installation hors de l'atelier depuis la wheel et depuis l'archive `git archive`, avec un contrôle de `zc --version`, de l'aide et des modèles livrés (`templates/fr`, `templates/en`, skills), puis de `zc init --update` et `zc config show` sur un dossier synthétique, sans réseau. La version passe à 0.4.0 (D218).
+
+### D236. Reprise d'un dossier 0.3.2
+
+Options examinées. Un test permanent sur le faux serveur, ou une vérification ponctuelle par script.
+
+Décision, recommandation retenue. Un test permanent. Un dossier écrit par la 0.3.2, avec un plan français dont l'essai est fait, passe par `zc init --update`, puis `zc apply <plan> --all` reprend le plan et `zc undo` l'annule.
+
+### D237. Banc d'essai du pilote
+
+Options examinées. Un banc d'essai qui fait tourner le vrai `zc` sur une bibliothèque synthétique et un faux serveur gardé sur disque, puis quatre agents sans contexte, un par combinaison de langue de conversation et de bibliothèque. Ou le pilote directement sur le compte de test.
+
+Décision, recommandation retenue. Le banc d'essai, dans `outils/pilote/`, n'écrit sur aucun compte réel. Une commande y joue la synchronisation de Zotero. Les quatre agents rendent leurs frictions, corrigées ou soumises à l'auteur.
+
+### D238. Parcours réel sur le compte de test
+
+Décision, recommandation retenue. Un parcours par langue de bibliothèque, de l'audit à l'annulation, préparé d'avance et lancé seulement avec le feu vert de l'auteur, une fois la CI, l'installation, la reprise et le pilote passés.
+
+### D239. Dossier de travail de l'auteur et publication
+
+Décision, recommandation retenue. L'agent ne lit pas le dossier de travail de l'auteur et ne lance pas `outils/publier.sh`. L'auteur fait ces deux gestes lui-même, ou donne un feu vert explicite le moment venu, avec les commandes et les contrôles que l'agent lui fournit.
+
+### D240. Commandes de lecture à jour de zotero.org
+
+Constat du banc d'essai (D237). Après une passe de rangement pas encore reçue par Zotero, `zc subjects pending` donnait les chemins de collections que la passe avait fusionnées, et `zc inbox prepare` comptait des références déjà rangées. D171 et D174 ne couvraient pas ces commandes, alors que le `AGENTS.md` livré dit que `zc` lit sur zotero.org ce que Zotero n'a pas encore reçu.
+
+Décision, prise dans le prolongement de D171 et D174. `zc subjects inventory`, `track`, `titles`, `pending` et `zc inbox prepare` complètent la copie locale par zotero.org, et se contentent d'elle sans clé ou hors ligne. L'audit lit toujours la seule copie locale (D171).
+
+### D241. Tag concentré dans un thème
+
+Constat du banc d'essai. Un tag de marque porté par trois fiches, dont une seule rangée, était jugé « concentré dans le thème » de cette fiche, proposé à la suppression, et les deux autres fiches proposées pour ce thème.
+
+Décision. Un tag n'est concentré dans un thème que si au moins deux fiches y sont rangées et qu'elles font au moins la moitié des fiches qui le portent. Les marques « printed copy », « print copy », « paper copy » et « copie imprimée » rejoignent les formes reconnues de la marque papier (D156).
+
+### D242. Frictions des quatre pilotes
+
+Constats des pilotes du 08/10/2026 sur le banc d'essai (D237), un par combinaison de langue de conversation et de bibliothèque. Les quatre agents ont mené le parcours entier, de l'audit à l'annulation, sans erreur bloquante, la langue de leurs messages suivant l'utilisateur et celle de `zc` la bibliothèque.
+
+Décisions, prises dans le cadre de D237 (corriger, ou soumettre à l'auteur ce qui change la conception).
+- L'audit lu avant la synchronisation (quatre pilotes) dit, dans le terminal et en tête du rapport, que Zotero n'a pas encore reçu les derniers changements de zotero.org et que ses chiffres sont ceux d'avant. Il lit toujours la seule copie locale (D171).
+- Un groupe de doublons dont une partie seulement est en double (quatre pilotes) se règle par `zc duplicates accept <clé> --except <clé>`, et `zc duplicates find` ne repropose plus un groupe plus large qu'un groupe déjà jugé.
+- Un ISBN invalide est cherché par le titre comme un DOI (D128), au lieu d'une seule proposition de retrait.
+- Après `zc undo`, `zc` rappelle que les décisions du fichier de suivi n'ont pas changé et que le plan de l'étape les reprendrait.
+- Corrections mineures : modes du journal, conseil de téléchargement qui ne se répète plus quand le réglage est fait, « reading now » reconnu comme état, décompte de l'essai des tags, langue et rôle des noms en tête de `zc config show`, candidats des fiches sans place, décomptes expliqués du rangement, une fiche dans un seul paquet, skill des clés de citation aligné sur l'audit.
+- Précisions faites à la construction.
+  - `--except` retire les fiches nommées du groupe désigné et écrit, pour chacune, des paires `decision = "distinct"` avec les fiches restantes (mots de la 0.3.2). Un groupe jugé distinct n'est jamais redécoupé, pour ne pas cacher un doublon importé plus tard.
+  - Un ISBN invalide sans autre ISBN valide est remplacé par un livre trouvé avec certitude par son titre. Sinon, les candidats suivent le retrait, le plus proche de l'ISBN actuel en premier. Un ISBN retiré par un cas jugé laisse un cas `isbn_retire` refusé, nouveau mot stocké de `suivi/metadonnees.toml`. Les ISBN écartés ne reviennent plus, et un ISBN nouveau pour cette fiche devient un cas douteux, jamais certain.
+  - L'absence d'adresse de contact est dite une fois, en une phrase, et seulement si Crossref ou OpenAlex ont été interrogés.
+  - `zc subjects pending` propose aux fiches sans place les thèmes et les disciplines sans thème. Une fiche va dans un seul paquet, celui de sa première collection à répartir dans l'ordre de `suivi/fonds.toml`, sinon le paquet sans place. Une fiche déjà rangée dans le thème que désigne l'un de ses tags ne reçoit pas de proposition. Le rapport du plan et celui de `pending` disent ce que compte leur nombre.
+- Soumis à l'auteur, pour après la 0.4.0 : une commande pour écrire les décisions de rangement, aujourd'hui écrites à la main dans `suivi/rangement.toml`.
+
+### D243. Périmètre de l'outil et outils complémentaires
+
+Constat, le 08/10/2026. Des extensions de Zotero fondées sur des modèles de langue (Beaver, llm-for-zotero, Scite et d'autres) font déjà ce que D31 prévoyait pour la v0.4 et au-delà. Elles résument et expliquent les PDF dans le lecteur, répondent aux questions sur la bibliothèque en citant les passages, cherchent des articles hors de la bibliothèque et situent les citations, le tout dans Zotero, sans terminal. Beaver et llm-for-zotero modifient aussi des fiches (tags, collections, métadonnées), une confirmation à la fois, sans plan relisible, essai, journal ni annulation d'ensemble. Aucune n'annonce de fusion de doublons, de plan de classement validé, de clés Better BibTeX ni de noms de fichiers selon le modèle de Zotero.
+
+Options examinées. A, garder la feuille de route de D31 (suggestions de textes manquants en v0.4, puis notes). B, restreindre `zot-clean` au nettoyage et à l'entretien de la bibliothèque, et renvoyer vers ces extensions pour la lecture, les questions et la découverte. C, faire en plus de `zc` une source pour ces extensions (serveur MCP, export).
+
+Décision B, choisie par l'auteur. `zot-clean` met de l'ordre dans une bibliothèque et l'y maintient, par des plans en masse avec essai, sauvegarde, journal et annulation. Les suggestions de lecture, la production de notes et le travail sur le texte des PDF sortent du périmètre. L'inventaire papier de D31 n'est pas concerné. Le README, le guide et le `AGENTS.md` de l'atelier disent le nouveau périmètre. Le guide présente ces extensions comme complémentaires, plus utiles sur une bibliothèque déjà nettoyée, et rappelle qu'elles envoient ce qu'elles lisent à leur fournisseur sans connaître les fiches tenues à l'écart (D66). L'option C n'est pas retenue pour l'instant. Révise D31.
+
+### D244. Parcours réel de la version 0.4
+
+Parcours de D238 fait le 08/10/2026 sur le compte de test, l'auteur faisant les gestes dans Zotero et la remise à zéro du compte (`clear.py`, `populate.py`).
+- Mise à jour d'un dossier 0.3.2 (`~/zc-test`). `zc init --update` remplace les consignes, retire les six anciens skills de `.agents/` et de `.claude/` et écrit `guide.md`. `zc config show` donne `fr` et les noms d'avant, `zc audit` les mêmes constats que la veille.
+- Bibliothèque française (`~/zc-test-fr`) puis anglaise (`~/zc-test-en`), sur le même compte rempli de nouveau. Doublons jugés (3 sûrs, Leroy fusionné sur la foi de son PDF identique, Robin et Vygotski distincts, Heylen accepté puis écarté pour ses types différents), plan de 4 groupes, refus sans essai puis sans sauvegarde, essai vérifié par `zc show`, application complète, audit avant synchronisation qui prévient du retard de Zotero, puis annulation appliquée en entier et vérifiée. Rapports, messages et `suivi/` dans la langue de la bibliothèque, mots stockés en français, `config.toml` anglais écrit en clair (`fonds = "Subjects"`, `etats = ["1 to read", …]`, `tags_exclus = ["_private"]`), `method.md` livré.
+- La sauvegarde vaut pour le dossier Zotero, pas pour le dossier de travail. Faite dans le parcours français, elle a suffi au parcours anglais, comme prévu par D15.
+- Corrigé. `zc show` d'une clé de note montrait un bloc vide, une note rattachée désigne maintenant sa fiche comme une pièce jointe, et le texte d'une note seule est dit jamais montré. Guillemets anglais (“ ”) dans les textes anglais du rapport d'annulation, de `zc show`, du rangement et des clés de citation. Libellés de l'audit alignés sur le plus long (« To review », « Non contrôlé » débordaient). Une question de `zc init` lancé sans terminal finit sa ligne au lieu de se coller au message suivant.
 
 ## Questions ouvertes
 

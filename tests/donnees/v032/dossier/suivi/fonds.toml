@@ -1,0 +1,107 @@
+# Correspondance entre l'ancien classement et le plan du fonds, préparée par `zc fonds inventaire`.
+# Ce fichier se relit et se modifie à la main ou avec l'agent. `zc fonds inventaire` le met à jour sans
+# perdre les sorts déjà donnés, `zc fonds valider` le contrôle avec plan.md.
+#
+# Chaque ancienne collection reçoit un sort :
+#   "thème"     elle devient la collection `cible` du plan (chemin dans le fonds, « Sociologie/Méthodes »).
+#   "répartir"  ses fiches seront réparties une à une à l'étape 5, entre les `candidats` (chemins du plan). Une fois
+#               marquée examinée (`zc fonds a-ranger --examinees`), elle va à la corbeille, les fiches laissées y
+#               gardant leurs autres collections. Une collection déjà à un chemin du plan reste, elle.
+#   "projet"    elle va sous une racine de projets, au chemin `cible`, qui commence par le nom de la racine
+#               (« Projets/Cours L1 »). Vide, avec une seule racine de projets, elle y garde son nom.
+#   "archives"  elle va sous la racine des archives, sous le nom `cible` (par défaut, son chemin actuel).
+#   "dissoudre" elle va à la corbeille, ses fiches gardent leurs autres collections.
+#   "hors plan" elle reste telle quelle, avec ses sous-collections.
+# Un sort vide reste à donner. `candidats` ne sert qu'au sort « répartir ». `note` est libre.
+#
+# La table `racines` donne le nouveau nom de chaque racine, appliqué par `zc fonds planifier --racines`,
+# par exemple "40 Fonds" = "Fonds". Une racine absente de la table garde son nom.
+#
+# La table `tags`, en fin de fichier, relie un tag thématique à un chemin du plan, comme indice pour ranger ses fiches à l'étape 5,
+# par exemple "perception visuelle" = "Psychologie/Perception".
+
+[[collection]]
+# déjà sous une racine de projets
+cle = "2222UUBE"
+chemin = "20 Cours/Psy L1"
+effectif = 1
+sort = "projet"
+cible = "20 Cours/Psy L1"
+candidats = []
+note = ""
+
+[[collection]]
+# déjà à sa place dans le plan
+cle = "2222UUBB"
+chemin = "40 Fonds/Arts"
+effectif = 1
+sort = "thème"
+cible = "Arts"
+candidats = []
+note = ""
+
+[[collection]]
+# dans le fonds actuel, à garder, renommer ou fusionner
+cle = "2222UUBC"
+chemin = "40 Fonds/Arts/Musées"
+effectif = 1
+sort = "thème"
+cible = "Arts"
+candidats = []
+note = ""
+
+[[collection]]
+# déjà à sa place dans le plan
+cle = "2222UUB8"
+chemin = "40 Fonds/Psychologie"
+effectif = 0
+sort = "thème"
+cible = "Psychologie"
+candidats = []
+note = ""
+
+[[collection]]
+# déjà à sa place dans le plan
+cle = "2222UUB9"
+chemin = "40 Fonds/Psychologie/Perception"
+effectif = 3
+sort = "répartir"
+cible = ""
+candidats = ["Psychologie/Perception", "Psychologie/Perception/Apprentissage perceptif"]
+note = ""
+
+[[collection]]
+# dans le fonds actuel, à garder, renommer ou fusionner
+cle = "2222UUBA"
+chemin = "40 Fonds/Psychologie/Émotions"
+effectif = 1
+sort = "thème"
+cible = "Psychologie/Émotion"
+candidats = []
+note = ""
+
+[[collection]]
+cle = "2222UUB7"
+chemin = "Vieux"
+effectif = 1
+sort = "dissoudre"
+cible = ""
+candidats = []
+note = "plus utilisée"
+
+[[collection]]
+cle = "2222UUBD"
+chemin = "Vieux/Cours ancien"
+effectif = 1
+sort = "archives"
+cible = ""
+candidats = []
+note = ""
+
+[racines]
+"20 Cours" = "Cours"
+"40 Fonds" = "Fonds"
+"80 Archives" = "Archives"
+
+[tags]
+"apprentissage visuel" = "Psychologie/Perception/Apprentissage perceptif"

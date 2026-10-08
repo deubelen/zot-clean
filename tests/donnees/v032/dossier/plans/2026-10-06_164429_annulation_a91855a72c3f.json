@@ -1,0 +1,368 @@
+{
+ "format": 2,
+ "empreinte": "a91855a72c3f",
+ "etape": "annulation",
+ "bibliotheque": 4242,
+ "groupes": [
+  {
+   "id": "2222UUBA",
+   "titre": "annulation du groupe 2222UUBA",
+   "operations": [
+    {
+     "cle": "2222UUBA",
+     "avant": {
+      "tags": [
+       {
+        "tag": "#attention"
+       },
+       {
+        "tag": "3 lu"
+       }
+      ]
+     },
+     "apres": {
+      "tags": [
+       {
+        "tag": "Humans",
+        "type": 1
+       },
+       {
+        "tag": "Attention",
+        "type": 1
+       },
+       {
+        "tag": "perception visuelle"
+       },
+       {
+        "tag": "3 lu"
+       },
+       {
+        "tag": "to read"
+       }
+      ]
+     },
+     "rang": 0,
+     "nature": "annulation",
+     "genre": "items",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  },
+  {
+   "id": "2222UUBD",
+   "titre": "annulation du groupe 2222UUBD",
+   "operations": [
+    {
+     "cle": "2222UUBD",
+     "avant": {
+      "tags": [
+       {
+        "tag": "#attention"
+       },
+       {
+        "tag": "émotion"
+       },
+       {
+        "tag": "#machine learning"
+       }
+      ]
+     },
+     "apres": {
+      "tags": [
+       {
+        "tag": "Attention",
+        "type": 1
+       },
+       {
+        "tag": "emotions"
+       },
+       {
+        "tag": "Machine-Learning"
+       }
+      ]
+     },
+     "rang": 0,
+     "nature": "annulation",
+     "genre": "items",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  },
+  {
+   "id": "2222UUBB",
+   "titre": "annulation du groupe 2222UUBB",
+   "operations": [
+    {
+     "cle": "2222UUBB",
+     "avant": {
+      "tags": [
+       {
+        "tag": "#attention"
+       },
+       {
+        "tag": "émotion"
+       },
+       {
+        "tag": "mémoire"
+       }
+      ]
+     },
+     "apres": {
+      "tags": [
+       {
+        "tag": "Attention",
+        "type": 1
+       },
+       {
+        "tag": "émotion"
+       },
+       {
+        "tag": "mémoire"
+       }
+      ]
+     },
+     "rang": 0,
+     "nature": "annulation",
+     "genre": "items",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  },
+  {
+   "id": "2222UUBH",
+   "titre": "annulation du groupe 2222UUBH",
+   "operations": [
+    {
+     "cle": "2222UUBH",
+     "avant": {
+      "tags": [
+       {
+        "tag": "_privé"
+       },
+       {
+        "tag": "patient Dupont"
+       }
+      ]
+     },
+     "apres": {
+      "tags": [
+       {
+        "tag": "_privé"
+       },
+       {
+        "tag": "patient Dupont"
+       },
+       {
+        "tag": "Secretauto",
+        "type": 1
+       }
+      ]
+     },
+     "rang": 0,
+     "nature": "annulation",
+     "genre": "items",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  },
+  {
+   "id": "2222UUBG",
+   "titre": "annulation du groupe 2222UUBG",
+   "operations": [
+    {
+     "cle": "2222UUBG",
+     "avant": {
+      "tags": []
+     },
+     "apres": {
+      "tags": [
+       {
+        "tag": "mot-clé 0"
+       },
+       {
+        "tag": "mot-clé 1"
+       },
+       {
+        "tag": "mot-clé 2"
+       },
+       {
+        "tag": "mot-clé 3"
+       },
+       {
+        "tag": "mot-clé 4"
+       },
+       {
+        "tag": "mot-clé 5"
+       },
+       {
+        "tag": "mot-clé 6"
+       },
+       {
+        "tag": "mot-clé 7"
+       },
+       {
+        "tag": "mot-clé 8"
+       },
+       {
+        "tag": "mot-clé 9"
+       }
+      ]
+     },
+     "rang": 0,
+     "nature": "annulation",
+     "genre": "items",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  },
+  {
+   "id": "2222UUBC",
+   "titre": "annulation du groupe 2222UUBC",
+   "operations": [
+    {
+     "cle": "2222UUBC",
+     "avant": {
+      "tags": [
+       {
+        "tag": "#attention"
+       },
+       {
+        "tag": "émotion"
+       }
+      ]
+     },
+     "apres": {
+      "tags": [
+       {
+        "tag": "Attention",
+        "type": 1
+       },
+       {
+        "tag": "Emotion",
+        "type": 1
+       }
+      ]
+     },
+     "rang": 0,
+     "nature": "annulation",
+     "genre": "items",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  },
+  {
+   "id": "2222UUB9",
+   "titre": "annulation du groupe 2222UUB9",
+   "operations": [
+    {
+     "cle": "2222UUB9",
+     "avant": {
+      "tags": [
+       {
+        "tag": "#attention"
+       },
+       {
+        "tag": "1 à lire"
+       },
+       {
+        "tag": "mémoire"
+       }
+      ]
+     },
+     "apres": {
+      "tags": [
+       {
+        "tag": "Humans",
+        "type": 1
+       },
+       {
+        "tag": "Attention",
+        "type": 1
+       },
+       {
+        "tag": "to read"
+       },
+       {
+        "tag": "perception visuelle"
+       },
+       {
+        "tag": "mémoire"
+       },
+       {
+        "tag": "Vision",
+        "type": 1
+       }
+      ]
+     },
+     "rang": 0,
+     "nature": "annulation",
+     "genre": "items",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  },
+  {
+   "id": "tagColors",
+   "titre": "annulation du groupe tagColors",
+   "operations": [
+    {
+     "cle": "tagColors",
+     "avant": {
+      "value": [
+       {
+        "name": "1 à lire",
+        "color": "#FF6666"
+       },
+       {
+        "name": "2 en cours",
+        "color": "#FF8C19"
+       },
+       {
+        "name": "3 lu",
+        "color": "#5FB236"
+       },
+       {
+        "name": "★ essentiel",
+        "color": "#FFD400"
+       },
+       {
+        "name": "papier",
+        "color": "#A28AE5"
+       }
+      ]
+     },
+     "apres": {
+      "value": null
+     },
+     "rang": 0,
+     "nature": "annulation",
+     "genre": "settings",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  }
+ ],
+ "description": "Annulation de 2026-10-06_164429_tags.jsonl, 2026-10-06_164429_tags_2.jsonl.",
+ "partiel": true,
+ "annule": [
+  "2026-10-06_164429_tags.jsonl",
+  "2026-10-06_164429_tags_2.jsonl"
+ ],
+ "cree": "2026-10-06T16:44:29+02:00"
+}

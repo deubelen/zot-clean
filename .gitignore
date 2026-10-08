@@ -8,6 +8,8 @@ dist/
 .ruff_cache/
 .kilo/
 config.toml
+# Configurations fictives des fixtures dorées de la 0.3.2 (D209)
+!tests/donnees/v032/**/config.toml
 *.sqlite
 
 # Dossiers de travail de zc, s'ils sont créés à la racine du dépôt

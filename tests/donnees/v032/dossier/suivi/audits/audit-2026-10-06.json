@@ -1,0 +1,54 @@
+{
+ "chiffres": {
+  "référence": 9,
+  "pièce jointe": 0,
+  "note": 0,
+  "collection": 12
+ },
+ "points": {
+  "Chiffres d'ensemble": [],
+  "Références sans collection": [
+   "2222UUBN"
+  ],
+  "Doublons probables": [],
+  "Métadonnées manquantes": [
+   "article sans DOI · 2222UUBF",
+   "article sans DOI · 2222UUBG",
+   "article sans DOI · 2222UUBH",
+   "article sans DOI · 2222UUBI",
+   "article sans DOI · 2222UUBJ",
+   "article sans DOI · 2222UUBK",
+   "article sans DOI · 2222UUBL",
+   "article sans DOI · 2222UUBM",
+   "article sans DOI · 2222UUBN"
+  ],
+  "Fichiers absents": [],
+  "PDF identiques": [],
+  "Tags": [
+   "hors familles · apprentissage visuel"
+  ],
+  "Clés de citation": [
+   "sans clé · 2222UUBF",
+   "sans clé · 2222UUBG",
+   "sans clé · 2222UUBH",
+   "sans clé · 2222UUBI",
+   "sans clé · 2222UUBJ",
+   "sans clé · 2222UUBK",
+   "sans clé · 2222UUBL",
+   "sans clé · 2222UUBM",
+   "sans clé · 2222UUBN"
+  ],
+  "Noms des fichiers": [],
+  "Structure des collections": [
+   "racine · Vieux",
+   "vide · 80 Archives"
+  ],
+  "Synchronisation": [],
+  "Plan du fonds": [
+   "hors fonds · 2222UUBK",
+   "hors fonds · 2222UUBM",
+   "à créer · Psychologie/Perception/Apprentissage perceptif",
+   "à créer · Psychologie/Émotion"
+  ]
+ }
+}

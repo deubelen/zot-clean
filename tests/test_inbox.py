@@ -1,17 +1,18 @@
-"""Tri de l'Inbox (D135), sur une bibliothèque synthétique déjà rangée, le faux serveur et les fausses sources."""
+"""Inbox sort (D135), on an already filed synthetic library, the fake server and the fake sources."""
 
 import itertools
 
 import pytest
 
-from faux_serveur import FauxServeur
-from faux_sources import FauxServices, crossref_work
-from test_appliquer import ecrire
-from zot_clean import doublons, fonds as f, inbox as i, lecture, rangement as r, sources
-from zot_clean.appliquer import ESSAI, appliquer
+from fake_server import FakeServer
+from fake_sources import FakeServices, crossref_work
+from test_apply import write
+from zot_clean import duplicates, subjects as f, inbox as i, reader, filing as r, sources
+from zot_clean.apply import TRIAL, apply_plan
 from zot_clean.config import Config
+from zot_clean.lang import language
 
-PLAN = """\
+OUTLINE = """\
 # Fonds
 
 ## Psychologie
@@ -33,308 +34,325 @@ ARTICLE = dict(publicationTitle='', volume='', issue='', pages='', ISSN='', lang
 
 
 @pytest.fixture
-def serveur():
-    return FauxServeur()
+def server():
+    return FakeServer()
 
 
 @pytest.fixture
-def faux():
-    return FauxServices()
+def fake():
+    return FakeServices()
 
 
 @pytest.fixture
 def cfg(tmp_path, zotero):
-    c = Config(dossier_travail=tmp_path / 'travail', dossier_zotero=zotero.dossier)
-    c.dossier_travail.mkdir()
-    c.methode.projets = ['Cours']
+    c = Config(workspace=tmp_path / 'travail', zotero_dir=zotero.folder)
+    c.workspace.mkdir()
+    c.method.projects = ['Cours']
     return c
 
 
-class Monde:
-    def __init__(self, zotero, serveur):
-        self.zotero, self.serveur = zotero, serveur
-        serveur._n = itertools.count(10 ** 6)
+class World:
+    def __init__(self, zotero, server):
+        self.zotero, self.server = zotero, server
+        server._n = itertools.count(10 ** 6)
         self.ids: dict[str, int] = {}
 
-    def collection(self, nom, parent=None):
-        cle = self.serveur.collection(nom, parent)
-        self.ids[cle] = self.zotero.collection(nom, self.ids[parent] if parent else None, cle=cle)
-        return cle
+    def collection(self, name, parent=None):
+        key = self.server.collection(name, parent)
+        self.ids[key] = self.zotero.collection(name, self.ids[parent] if parent else None, key=key)
+        return key
 
-    def fiche(self, titre, *collections, auteur='Durand', **champs):
-        cle = self.serveur._cle()
-        self.zotero.fiche(titre, auteurs=(auteur,), collections=tuple(self.ids[c] for c in collections), cle=cle,
-                          **champs)
-        self.serveur.ajouter(title=titre, key=cle, collections=list(collections),
-                             creators=[{'creatorType': 'author', 'lastName': auteur}], date='2020',
-                             **(ARTICLE | champs))
-        return cle
+    def item(self, title, *collections, author='Durand', **fields):
+        key = self.server._key()
+        self.zotero.item(title, authors=(author,), collections=tuple(self.ids[c] for c in collections), key=key,
+                          **fields)
+        self.server.add(title=title, key=key, collections=list(collections),
+                             creators=[{'creatorType': 'author', 'lastName': author}], date='2020',
+                             **(ARTICLE | fields))
+        return key
 
-    def lire(self):
-        self.zotero.synchroniser(self.serveur.version)
-        return lecture.lire(self.zotero.enregistrer())
+    def read(self):
+        self.zotero.sync(self.server.version)
+        return reader.read(self.zotero.save())
 
 
 @pytest.fixture
-def monde(zotero, serveur, cfg):
-    m = Monde(zotero, serveur)
+def world(zotero, server, cfg):
+    m = World(zotero, server)
     k = {'Inbox': m.collection('Inbox'), 'Fonds': m.collection('Fonds'), 'Cours': m.collection('Cours')}
     k['Psy'] = m.collection('Psychologie', k['Fonds'])
     k['Perception'] = m.collection('Perception', k['Psy'])
     k['Arts'] = m.collection('Arts', k['Fonds'])
     k['L1'] = m.collection('Psy L1', k['Cours'])
-    fiches = {
-        'gibson': m.fiche('The ecological approach to visual perception', k['Perception'], auteur='Gibson'),
-        'ancienne': m.fiche('Museum displays and their publics', k['Arts'], DOI='10.1111/musee'),
-        'nouvelle': m.fiche('Perceptual learning revisited', k['Inbox'], auteur='Gibson', DOI='10.1111/appr'),
-        'double': m.fiche('Museum displays and their publics', k['Inbox'], DOI='10.1111/musee'),
-        'projet': m.fiche('Teaching perception to first-year students', k['L1']),
+    items = {
+        'gibson': m.item('The ecological approach to visual perception', k['Perception'], author='Gibson'),
+        'ancienne': m.item('Museum displays and their publics', k['Arts'], DOI='10.1111/musee'),
+        'nouvelle': m.item('Perceptual learning revisited', k['Inbox'], author='Gibson', DOI='10.1111/appr'),
+        'double': m.item('Museum displays and their publics', k['Inbox'], DOI='10.1111/musee'),
+        'projet': m.item('Teaching perception to first-year students', k['L1']),
     }
-    b = m.lire()
-    (cfg.dossier_travail / f.PLAN).write_text(PLAN, encoding='utf-8')
-    _, suivi, _, _ = f.inventaire(b, cfg)
-    sorts = {'Fonds/Psychologie': (f.THEME, 'Psychologie'), 'Fonds/Psychologie/Perception':
+    b = m.read()
+    (cfg.workspace / f.OUTLINE).write_text(OUTLINE, encoding='utf-8')
+    _, tracking, _, _ = f.inventory(b, cfg)
+    actions = {'Fonds/Psychologie': (f.THEME, 'Psychologie'), 'Fonds/Psychologie/Perception':
              (f.THEME, 'Psychologie/Perception'), 'Fonds/Arts': (f.THEME, 'Arts')}
-    for c in suivi.collections:
-        if c.chemin in sorts:
-            c.sort, c.cible = sorts[c.chemin]
-    f.ecrire_suivi(cfg, suivi)
-    controle = f.controler(cfg)
-    assert not controle.erreurs, controle.erreurs
-    f.enregistrer(cfg, controle)
-    return m, k, fiches, b
+    for c in tracking.collections:
+        if c.path in actions:
+            c.action, c.target = actions[c.path]
+    f.write_tracking(cfg, tracking)
+    check = f.check(cfg)
+    assert not check.errors, check.errors
+    f.save(cfg, check)
+    return m, k, items, b
 
 
-def services(cfg, faux):
-    return sources.depuis_config(cfg, client_http=faux.client(), attendre=lambda s: None)
+def services(cfg, fake):
+    return sources.from_config(cfg, client_http=fake.client(), wait=lambda s: None)
 
 
-def test_tri_de_bout_en_bout(monde, cfg, serveur, faux, zotero):
-    m, k, fiches, b = monde
-    faux.ajouter(doi='10.1111/appr', titre='Perceptual learning revisited', auteurs=(('Gibson', 'Eleanor'),),
-                 annee=2020, volume='12', **{'container-title': ['Cognition']})
-    faux.ajouter(doi='10.1111/musee', titre='Museum displays and their publics', auteurs=(('Durand', 'A'),),
-                 annee=2020)
-    schema = lecture.lire_types(zotero.base)
-    rapport, liste = i.preparer(b, cfg, services(cfg, faux), serveur.client(), schema)
-    assert {a.fiche.cle for a in liste} == {fiches['nouvelle'], fiches['double'], fiches['projet']}
-    assert "2 dans l'Inbox et 1 sans place dans le fonds" in rapport
-    assert f"{fiches['ancienne']} / {fiches['double']}" in rapport or f"{fiches['double']} / {fiches['ancienne']}" in rapport
-    assert 'thèmes voisins, même auteur : Psychologie/Perception (1)' in rapport
-    assert f'depuis = "{k["Inbox"]}"' in rapport and 'action « ajouter »' in rapport
-    # Répétition du pilote : situation des références hors de l'Inbox, absence de thème voisin dite.
-    assert 'dont 0 hors de toute collection, 1 dans un projet.' in rapport
-    assert 'action « ajouter », sans depuis, reste dans son projet' in rapport
-    assert (cfg.suivi / r.FICHIER).read_text(encoding='utf-8').startswith(r.EN_TETE)
+def test_sorting_end_to_end(world, cfg, server, fake, zotero):
+    m, k, items, b = world
+    fake.add(doi='10.1111/appr', title='Perceptual learning revisited', authors=(('Gibson', 'Eleanor'),),
+                 year=2020, volume='12', **{'container-title': ['Cognition']})
+    fake.add(doi='10.1111/musee', title='Museum displays and their publics', authors=(('Durand', 'A'),),
+                 year=2020)
+    schema = reader.read_types(zotero.database)
+    report, listing = i.prepare(b, cfg, services(cfg, fake), server.client(), schema)
+    assert {a.item.key for a in listing} == {items['nouvelle'], items['double'], items['projet']}
+    assert "2 dans l'Inbox et 1 sans place dans le fonds" in report
+    assert f"{items['ancienne']} / {items['double']}" in report or f"{items['double']} / {items['ancienne']}" in report
+    assert 'thèmes voisins, même auteur : Psychologie/Perception (1)' in report
+    assert f'depuis = "{k["Inbox"]}"' in report and 'action « ajouter »' in report
+    # Pilot rehearsal: situation of the references outside the Inbox, absence of a neighboring theme stated.
+    assert 'dont 0 hors de toute collection, 1 dans un projet.' in report
+    assert 'action « ajouter », sans depuis, reste dans son projet' in report
+    assert (cfg.tracking / r.FILE).read_text(encoding='utf-8').startswith(r.header())
 
-    # Jugement : fusion du doublon, rangement de la nouvelle et de celle du projet.
-    entrees = doublons.charger_suivi(cfg)
-    for e in entrees:
-        e.decision, e.conserver = doublons.FUSIONNER, fiches['ancienne']
-    doublons.ecrire_suivi(cfg, entrees, b)
-    r.ecrire(cfg, [r.Entree(fiches['nouvelle'], r.DEPLACER, 'Psychologie/Perception', k['Inbox'], decision=r.ACCEPTER),
-                   r.Entree(fiches['projet'], r.AJOUTER, 'Arts', decision=r.ACCEPTER)], b, set())
+    # Judgment: merge of the duplicate, filing of the new one and of the project one.
+    entries = duplicates.load_tracking(cfg)
+    for e in entries:
+        e.decision, e.keep = duplicates.MERGE, items['ancienne']
+    duplicates.write_tracking(cfg, entries, b)
+    r.write(cfg, [r.Entry(items['nouvelle'], r.MOVE, 'Psychologie/Perception', k['Inbox'], decision=r.ACCEPT),
+                   r.Entry(items['projet'], r.ADD, 'Arts', decision=r.ACCEPT)], b, set())
 
-    plan, rapport = i.planifier(b, cfg, services(cfg, faux), serveur.client(), schema)
-    assert plan.etape == 'inbox' and [g.id for g in plan.groupes][0] == 'fusion-1'
-    par_id = {g.id: g for g in plan.groupes}
-    nouvelle = par_id[fiches['nouvelle']].operations
-    assert [op.rang for op in nouvelle] == [1, 2]
-    assert nouvelle[0].apres['volume'] == '12' and nouvelle[1].apres['collections'] == [k['Perception']]
-    # La fiche gardée de la fusion ne reçoit pas l'Inbox de la fiche absorbée.
-    gardee = next(op for op in par_id['fusion-1'].operations if op.cle == fiches['ancienne'])
-    assert 'collections' not in gardee.apres
-    assert 'entre dans Fonds/Psychologie/Perception' in rapport and 'quitte Inbox' in rapport
+    plan, report = i.make_plan(b, cfg, services(cfg, fake), server.client(), schema)
+    assert plan.step == 'inbox' and [g.id for g in plan.groups][0] == 'fusion-1'
+    by_id = {g.id: g for g in plan.groups}
+    new = by_id[items['nouvelle']].operations
+    assert [op.rank for op in new] == [1, 2]
+    assert new[0].after['volume'] == '12' and new[1].after['collections'] == [k['Perception']]
+    # The item kept by the merge does not receive the Inbox of the absorbed item.
+    kept_item = next(op for op in by_id['fusion-1'].operations if op.key == items['ancienne'])
+    assert 'collections' not in kept_item.after
+    assert 'entre dans Fonds/Psychologie/Perception' in report and 'quitte Inbox' in report
 
-    bilan = appliquer(plan, ecrire(plan, cfg), serveur.client(), cfg, ESSAI)
-    assert not bilan.conflits and not bilan.erreurs and bilan.restants == 0
-    assert serveur.elements[fiches['nouvelle']]['collections'] == [k['Perception']]
-    assert serveur.elements[fiches['nouvelle']]['volume'] == '12'
-    assert serveur.elements[fiches['projet']]['collections'] == [k['L1'], k['Arts']]
-    assert serveur.elements[fiches['double']]['deleted'] is True
-    assert serveur.elements[fiches['ancienne']]['collections'] == [k['Arts']]
-
-
-def test_reference_hors_de_toute_collection(monde, cfg, serveur, faux, zotero):
-    """Une référence sans collection est dite « hors de toute collection », pas « dans un projet », et l'absence de
-    thème voisin est dite (répétition du pilote). Sans décision, le plan la cite parmi celles qui restent."""
-    m, k, fiches, _ = monde
-    libre = m.fiche('Un texte isolé', auteur='Personne')
-    b = m.lire()
-    schema = lecture.lire_types(zotero.base)
-    rapport, _ = i.preparer(b, cfg, services(cfg, faux), serveur.client(), schema)
-    assert 'dont 1 hors de toute collection, 1 dans un projet.' in rapport
-    ligne = rapport.split(f'- {libre} · ', 1)[1]
-    assert 'dans aucune collection · action « ajouter », sans depuis\n  - aucun thème voisin trouvé' in ligne
-    _, rapport = i.planifier(b, cfg, services(cfg, faux), serveur.client(), schema)
-    assert 'sans place dans le fonds, sans décision de rangement acceptée' in rapport and libre in rapport
-    # Vue et laissée hors du fonds par décision (D176), elle n'est plus présentée, seulement comptée.
-    r.laisser(b, cfg, [libre])
-    rapport, liste = i.preparer(b, cfg, services(cfg, faux), serveur.client(), schema)
-    assert libre not in {x.fiche.cle for x in liste} and f'- {libre} · ' not in rapport
-    assert '1 autre référence laissée hors du fonds par décision' in rapport
-    _, rapport = i.planifier(b, cfg, services(cfg, faux), serveur.client(), schema)
-    assert libre not in rapport
+    outcome = apply_plan(plan, write(plan, cfg), server.client(), cfg, TRIAL)
+    assert not outcome.conflicts and not outcome.errors and outcome.remaining == 0
+    assert server.all_items[items['nouvelle']]['collections'] == [k['Perception']]
+    assert server.all_items[items['nouvelle']]['volume'] == '12'
+    assert server.all_items[items['projet']]['collections'] == [k['L1'], k['Arts']]
+    assert server.all_items[items['double']]['deleted'] is True
+    assert server.all_items[items['ancienne']]['collections'] == [k['Arts']]
 
 
-def _pdf(zotero, serveur, parent_id, parent, nom, titre):
-    cle = serveur._cle()
-    zotero.pdf(parent_id, nom, nom.encode(), cle=cle, titre=titre)
-    serveur.ajouter('attachment', key=cle, parentItem=parent, linkMode='imported_file', filename=nom, title=titre,
+def test_reference_outside_any_collection(world, cfg, server, fake, zotero):
+    """A reference without a collection is described as « hors de toute collection », not « dans un projet », and the
+    absence of a neighboring theme is stated (pilot rehearsal). Without a decision, the plan lists it among those
+    that remain."""
+    m, k, items, _ = world
+    free = m.item('Un texte isolé', author='Personne')
+    b = m.read()
+    schema = reader.read_types(zotero.database)
+    report, _ = i.prepare(b, cfg, services(cfg, fake), server.client(), schema)
+    assert 'dont 1 hors de toute collection, 1 dans un projet.' in report
+    line = report.split(f'- {free} · ', 1)[1]
+    assert 'dans aucune collection · action « ajouter », sans depuis\n  - aucun thème voisin trouvé' in line
+    _, report = i.make_plan(b, cfg, services(cfg, fake), server.client(), schema)
+    assert 'sans place dans le fonds, sans décision de rangement acceptée' in report and free in report
+    # Seen and left outside the subject collections by decision (D176), it is no longer presented, only counted.
+    r.leave_out(b, cfg, [free])
+    report, listing = i.prepare(b, cfg, services(cfg, fake), server.client(), schema)
+    assert free not in {x.item.key for x in listing} and f'- {free} · ' not in report
+    assert '1 autre référence laissée hors du fonds par décision' in report
+    _, report = i.make_plan(b, cfg, services(cfg, fake), server.client(), schema)
+    assert free not in report
+
+
+def _pdf(zotero, server, parent_id, parent, name, title):
+    key = server._key()
+    zotero.pdf(parent_id, name, name.encode(), key=key, title=title)
+    server.add('attachment', key=key, parentItem=parent, linkMode='imported_file', filename=name, title=title,
                     contentType='application/pdf')
-    return cle
+    return key
 
 
-def test_nom_du_fichier_suit_le_plan_de_tri(monde, cfg, serveur, faux, zotero):
-    # D149 : la date complétée et la fusion changent le nom du fichier principal, calculé d'après le plan.
-    m, k, fiches, b = monde
-    sans_date = serveur._cle()
-    iid = zotero.fiche('Seeing affordances', auteurs=('Gibson',), date='', collections=(m.ids[k['Inbox']],),
-                       cle=sans_date, DOI='10.1111/aff')
-    serveur.ajouter(title='Seeing affordances', key=sans_date, collections=[k['Inbox']], date='', DOI='10.1111/aff',
+def test_filename_follows_sorting_plan(world, cfg, server, fake, zotero):
+    # D149: the completed date and the merge change the name of the main file, computed from the plan.
+    m, k, items, b = world
+    no_date = server._key()
+    iid = zotero.item('Seeing affordances', authors=('Gibson',), date='', collections=(m.ids[k['Inbox']],),
+                       key=no_date, DOI='10.1111/aff')
+    server.add(title='Seeing affordances', key=no_date, collections=[k['Inbox']], date='', DOI='10.1111/aff',
                     creators=[{'creatorType': 'author', 'lastName': 'Gibson'}], **ARTICLE)
-    ids = b.par_cle()
-    pdf = _pdf(zotero, serveur, iid, sans_date, 'Gibson - Seeing affordances.pdf', 'Gibson - Seeing affordances.pdf')
-    scan = _pdf(zotero, serveur, ids[fiches['double']].id, fiches['double'], 'scan.pdf', 'PDF')
-    # Un nom en retard sur une fiche dont le plan ne change que le volume reste tel quel.
-    vieux = _pdf(zotero, serveur, ids[fiches['nouvelle']].id, fiches['nouvelle'], 'vieux.pdf', 'PDF')
-    b = m.lire()
-    faux.ajouter(doi='10.1111/aff', titre='Seeing affordances', auteurs=(('Gibson', 'James'),), annee=2021)
-    faux.ajouter(doi='10.1111/appr', titre='Perceptual learning revisited', auteurs=(('Gibson', 'Eleanor'),),
-                 annee=2020, volume='12')
-    faux.ajouter(doi='10.1111/musee', titre='Museum displays and their publics', auteurs=(('Durand', 'A'),),
-                 annee=2020)
-    schema = lecture.lire_types(zotero.base)
-    i.preparer(b, cfg, services(cfg, faux), serveur.client(), schema)
-    entrees = doublons.charger_suivi(cfg)
-    for e in entrees:
-        e.decision, e.conserver = doublons.FUSIONNER, fiches['ancienne']
-    doublons.ecrire_suivi(cfg, entrees, b)
+    ids = b.by_key()
+    pdf = _pdf(zotero, server, iid, no_date, 'Gibson - Seeing affordances.pdf', 'Gibson - Seeing affordances.pdf')
+    scan = _pdf(zotero, server, ids[items['double']].id, items['double'], 'scan.pdf', 'PDF')
+    # A name lagging behind on an item whose plan only changes the volume stays as it is.
+    stale = _pdf(zotero, server, ids[items['nouvelle']].id, items['nouvelle'], 'vieux.pdf', 'PDF')
+    b = m.read()
+    fake.add(doi='10.1111/aff', title='Seeing affordances', authors=(('Gibson', 'James'),), year=2021)
+    fake.add(doi='10.1111/appr', title='Perceptual learning revisited', authors=(('Gibson', 'Eleanor'),),
+                 year=2020, volume='12')
+    fake.add(doi='10.1111/musee', title='Museum displays and their publics', authors=(('Durand', 'A'),),
+                 year=2020)
+    schema = reader.read_types(zotero.database)
+    i.prepare(b, cfg, services(cfg, fake), server.client(), schema)
+    entries = duplicates.load_tracking(cfg)
+    for e in entries:
+        e.decision, e.keep = duplicates.MERGE, items['ancienne']
+    duplicates.write_tracking(cfg, entries, b)
 
-    plan, rapport = i.planifier(b, cfg, services(cfg, faux), serveur.client(), schema)
-    par_id = {g.id: g for g in plan.groupes}
-    op = next(op for op in par_id[sans_date].operations if op.cle == pdf)
-    assert op.rang == i.RANG_NOM > 1
-    assert op.apres == {'filename': 'Gibson - 2021 - Seeing affordances.pdf', 'title': 'PDF'}
-    # Le PDF de la fiche absorbée devient le fichier principal de la fiche gardée, qui n'en avait pas.
-    op = next(op for op in par_id['fusion-1'].operations if op.cle == scan and op.rang == i.RANG_NOM)
-    assert op.apres == {'filename': 'Durand - 2020 - Museum displays and their publics.pdf'}
-    assert vieux not in {op.cle for g in plan.groupes for op in g.operations}
-    assert '« Gibson - Seeing affordances.pdf » → « Gibson - 2021 - Seeing affordances.pdf »' in rapport
+    plan, report = i.make_plan(b, cfg, services(cfg, fake), server.client(), schema)
+    by_id = {g.id: g for g in plan.groups}
+    op = next(op for op in by_id[no_date].operations if op.key == pdf)
+    assert op.rank == i.NAME_RANK > 1
+    assert op.after == {'filename': 'Gibson - 2021 - Seeing affordances.pdf', 'title': 'PDF'}
+    # The PDF of the absorbed item becomes the main file of the kept item, which had none.
+    op = next(op for op in by_id['fusion-1'].operations if op.key == scan and op.rank == i.NAME_RANK)
+    assert op.after == {'filename': 'Durand - 2020 - Museum displays and their publics.pdf'}
+    assert stale not in {op.key for g in plan.groups for op in g.operations}
+    assert '« Gibson - Seeing affordances.pdf » → « Gibson - 2021 - Seeing affordances.pdf »' in report
 
-    bilan = appliquer(plan, ecrire(plan, cfg), serveur.client(), cfg, ESSAI)
-    assert not bilan.conflits and not bilan.erreurs and bilan.restants == 0
-    assert serveur.elements[pdf]['filename'] == 'Gibson - 2021 - Seeing affordances.pdf'
-    assert serveur.elements[scan]['parentItem'] == fiches['ancienne']
-    assert serveur.elements[scan]['filename'] == 'Durand - 2020 - Museum displays and their publics.pdf'
-
-
-def test_cas_des_autres_fiches_gardes(monde, cfg, serveur, faux, zotero):
-    # Limiter l'examen aux références à trier ne doit pas effacer les cas en attente des autres fiches.
-    from zot_clean import metadonnees as md
-    m, k, fiches, b = monde
-    autre = md.Cas(fiches['gibson'], md.IDENTIFIANTS, 'doi_manquant', [md.Proposition({'DOI': '10.1/x'}, 'crossref')])
-    md.ecrire_suivi(cfg, [autre], b)
-    i.preparer(b, cfg, services(cfg, faux), serveur.client(), lecture.lire_types(zotero.base))
-    assert fiches['gibson'] in {c.cle for c in md.charger_suivi(cfg)}
+    outcome = apply_plan(plan, write(plan, cfg), server.client(), cfg, TRIAL)
+    assert not outcome.conflicts and not outcome.errors and outcome.remaining == 0
+    assert server.all_items[pdf]['filename'] == 'Gibson - 2021 - Seeing affordances.pdf'
+    assert server.all_items[scan]['parentItem'] == items['ancienne']
+    assert server.all_items[scan]['filename'] == 'Durand - 2020 - Museum displays and their publics.pdf'
 
 
-def test_sans_plan_du_fonds(zotero, serveur, cfg, faux):
-    m = Monde(zotero, serveur)
+def test_cases_of_other_items_kept(world, cfg, server, fake, zotero):
+    # Limiting the review to the references to sort must not erase the pending cases of the other items.
+    from zot_clean import metadata as md
+    m, k, items, b = world
+    other = md.Case(items['gibson'], md.IDENTIFIERS, 'doi_manquant', [md.Proposal({'DOI': '10.1/x'}, 'crossref')])
+    md.write_tracking(cfg, [other], b)
+    i.prepare(b, cfg, services(cfg, fake), server.client(), reader.read_types(zotero.database))
+    assert items['gibson'] in {c.key for c in md.load_tracking(cfg)}
+
+
+def test_without_outline(zotero, server, cfg, fake):
+    m = World(zotero, server)
     inbox = m.collection('Inbox')
-    m.fiche('Une nouveauté', inbox)
-    b = m.lire()
-    rapport, liste = i.preparer(b, cfg, services(cfg, faux), serveur.client(), lecture.lire_types(zotero.base))
-    assert len(liste) == 1 and "plan.md n'existe pas encore" in rapport
+    m.item('Une nouveauté', inbox)
+    b = m.read()
+    report, listing = i.prepare(b, cfg, services(cfg, fake), server.client(), reader.read_types(zotero.database))
+    assert len(listing) == 1 and "plan.md n'existe pas encore" in report
 
 
-def test_tags_du_tri_suivent_les_regles(zotero, serveur, cfg, faux):
-    # D155 : tags automatiques retirés selon la règle acceptée, tag manuel nouveau seulement signalé.
+def test_sorting_tags_follow_rules(zotero, server, cfg, fake):
+    # D155: automatic tags removed according to the accepted rule, new manual tag only reported.
     from zot_clean import tags as tg
-    m = Monde(zotero, serveur)
+    m = World(zotero, server)
     inbox = m.collection('Inbox')
-    cle = m.serveur._cle()
-    zotero.fiche('Une nouveauté', collections=(m.ids[inbox],), cle=cle, tags=(('Neurosciences', 1), 'mon idée'))
-    serveur.ajouter(title='Une nouveauté', key=cle, collections=[inbox], date='2020',
+    key = m.server._key()
+    zotero.item('Une nouveauté', collections=(m.ids[inbox],), key=key, tags=(('Neurosciences', 1), 'mon idée'))
+    server.add(title='Une nouveauté', key=key, collections=[inbox], date='2020',
                     creators=[{'creatorType': 'author', 'lastName': 'Durand'}],
                     tags=[{'tag': 'Neurosciences', 'type': 1}, {'tag': 'mon idée'}], **ARTICLE)
-    b = m.lire()
-    s = tg.Suivi(automatiques=tg.ACCEPTER)
-    tg.ecrire(cfg, s, b)
-    schema = lecture.lire_types(zotero.base)
-    rapport, _ = i.preparer(b, cfg, services(cfg, faux), serveur.client(), schema)
-    assert 'tags hors familles, sans règle : mon idée' in rapport
-    plan, rapport = i.planifier(b, cfg, services(cfg, faux), serveur.client(), schema)
-    op = next(op for g in plan.groupes for op in g.operations if op.rang == 3)
-    assert op.cle == cle and op.apres['tags'] == [{'tag': 'mon idée'}]
-    assert '− Neurosciences' in rapport
+    b = m.read()
+    s = tg.Tracking(automatic=tg.ACCEPT)
+    tg.write(cfg, s, b)
+    schema = reader.read_types(zotero.database)
+    report, _ = i.prepare(b, cfg, services(cfg, fake), server.client(), schema)
+    assert 'tags hors familles, sans règle : mon idée' in report
+    plan, report = i.make_plan(b, cfg, services(cfg, fake), server.client(), schema)
+    op = next(op for g in plan.groups for op in g.operations if op.rank == 3)
+    assert op.key == key and op.after['tags'] == [{'tag': 'mon idée'}]
+    assert '− Neurosciences' in report
 
 
-# --- Clés de citation (D146) ------------------------------------------------------
+# --- Citation keys (D146) ------------------------------------------------------
 
-def poser_cle(zotero, serveur, cle, cle_citation, ajout=None):
-    """Clé de citation posée dans la base locale et sur le serveur, date d'ajout locale changée au besoin."""
-    iid = zotero.db.execute('select itemID from items where key = ?', (cle,)).fetchone()[0]
-    zotero._champs(iid, {'citationKey': cle_citation})
-    if ajout:
-        zotero.db.execute('update items set dateAdded = ? where itemID = ?', (ajout, iid))
-    serveur.elements[cle]['citationKey'] = cle_citation
-
-
-def test_cles_de_citation_du_tri(monde, cfg, serveur, faux, zotero):
-    m, k, fiches, _ = monde
-    (zotero.dossier / 'better-bibtex').mkdir()  # Better BibTeX actif, détecté par son dossier
-    faux.ajouter(doi='10.1111/appr', titre='Perceptual learning revisited', auteurs=(('Gibson', 'Eleanor'),),
-                 annee=2020, volume='12', **{'container-title': ['Cognition']})
-    # La nouvelle référence a reçu la clé d'une fiche plus ancienne. Celle du projet, plus ancienne que la fiche
-    # du fonds dont elle partage la clé, la garde : c'est l'autre fiche qui reçoit le suffixe.
-    poser_cle(zotero, serveur, fiches['gibson'], 'gibson2020')
-    poser_cle(zotero, serveur, fiches['nouvelle'], 'Gibson2020')
-    poser_cle(zotero, serveur, fiches['projet'], 'durand2020', ajout='2010-01-01 00:00:00')
-    poser_cle(zotero, serveur, fiches['ancienne'], 'durand2020')
-    b = m.lire()
-    schema = lecture.lire_types(zotero.base)
-
-    rapport, _ = i.preparer(b, cfg, services(cfg, faux), serveur.client(), schema)
-    lignes = {ligne.split(' · ')[0][2:]: ligne for ligne in rapport.splitlines() if ligne.startswith('- ')}
-    assert 'sans clé de citation' in lignes[fiches['double']]
-    assert 'sans clé de citation' not in lignes[fiches['nouvelle']] and 'Better BibTeX › Fill' in rapport
-
-    plan, rapport = i.planifier(b, cfg, services(cfg, faux), serveur.client(), schema)
-    par_id = {g.id: g for g in plan.groupes}
-    # La clé de la référence triée rejoint ses champs, en une seule opération au rang 1.
-    rang1 = [op for op in par_id[fiches['nouvelle']].operations if op.rang == 1]
-    assert len(rang1) == 1 and rang1[0].apres['volume'] == '12' and rang1[0].apres['citationKey'] == 'gibson2020a'
-    # L'autre fiche du double est départagée dans le groupe de la référence triée.
-    op = next(op for op in par_id[fiches['projet']].operations if op.cle == fiches['ancienne'])
-    assert op.rang == 1 and op.apres == {'citationKey': 'durand2020a'}
-    assert f"champs ({fiches['ancienne']}) citationKey = 'durand2020a'" in rapport
-    assert fiches['gibson'] not in par_id
-
-    bilan = appliquer(plan, ecrire(plan, cfg), serveur.client(), cfg, ESSAI)
-    assert not bilan.conflits and not bilan.erreurs
-    assert serveur.elements[fiches['nouvelle']]['citationKey'] == 'gibson2020a'
-    assert serveur.elements[fiches['ancienne']]['citationKey'] == 'durand2020a'
-    assert serveur.elements[fiches['gibson']]['citationKey'] == 'gibson2020'
+def set_key(zotero, server, key, citation_key, date_added=None):
+    """Citation key set in the local database and on the server, local date added changed if needed."""
+    iid = zotero.db.execute('select itemID from items where key = ?', (key,)).fetchone()[0]
+    zotero._fields(iid, {'citationKey': citation_key})
+    if date_added:
+        zotero.db.execute('update items set dateAdded = ? where itemID = ?', (date_added, iid))
+    server.all_items[key]['citationKey'] = citation_key
 
 
-def test_tri_sans_bbt_ne_signale_pas_les_cles(monde, cfg, serveur, faux, zotero):
-    m, k, fiches, b = monde
-    rapport, _ = i.preparer(b, cfg, services(cfg, faux), serveur.client(), lecture.lire_types(zotero.base))
-    assert 'sans clé de citation' not in rapport
+def test_citation_keys_of_sorting(world, cfg, server, fake, zotero):
+    m, k, items, _ = world
+    (zotero.folder / 'better-bibtex').mkdir()  # Better BibTeX active, detected by its folder
+    fake.add(doi='10.1111/appr', title='Perceptual learning revisited', authors=(('Gibson', 'Eleanor'),),
+                 year=2020, volume='12', **{'container-title': ['Cognition']})
+    # The new reference received the key of an older item. The project one, older than the subject-collection item
+    # whose key it shares, keeps it: the other item receives the suffix.
+    set_key(zotero, server, items['gibson'], 'gibson2020')
+    set_key(zotero, server, items['nouvelle'], 'Gibson2020')
+    set_key(zotero, server, items['projet'], 'durand2020', date_added='2010-01-01 00:00:00')
+    set_key(zotero, server, items['ancienne'], 'durand2020')
+    b = m.read()
+    schema = reader.read_types(zotero.database)
+
+    report, _ = i.prepare(b, cfg, services(cfg, fake), server.client(), schema)
+    lines = {line.split(' · ')[0][2:]: line for line in report.splitlines() if line.startswith('- ')}
+    assert 'sans clé de citation' in lines[items['double']]
+    assert 'sans clé de citation' not in lines[items['nouvelle']] and 'Better BibTeX › Fill' in report
+
+    plan, report = i.make_plan(b, cfg, services(cfg, fake), server.client(), schema)
+    by_id = {g.id: g for g in plan.groups}
+    # The key of the sorted reference joins its fields, in a single operation at rank 1.
+    rank1 = [op for op in by_id[items['nouvelle']].operations if op.rank == 1]
+    assert len(rank1) == 1 and rank1[0].after['volume'] == '12' and rank1[0].after['citationKey'] == 'gibson2020a'
+    # The other item of the double is told apart in the group of the sorted reference.
+    op = next(op for op in by_id[items['projet']].operations if op.key == items['ancienne'])
+    assert op.rank == 1 and op.after == {'citationKey': 'durand2020a'}
+    assert f"champs ({items['ancienne']}) citationKey = 'durand2020a'" in report
+    assert items['gibson'] not in by_id
+
+    outcome = apply_plan(plan, write(plan, cfg), server.client(), cfg, TRIAL)
+    assert not outcome.conflicts and not outcome.errors
+    assert server.all_items[items['nouvelle']]['citationKey'] == 'gibson2020a'
+    assert server.all_items[items['ancienne']]['citationKey'] == 'durand2020a'
+    assert server.all_items[items['gibson']]['citationKey'] == 'gibson2020'
 
 
-def test_cle_partagee_avec_une_fiche_confidentielle(monde, cfg, serveur, faux, zotero):
-    # D126, D188 : la référence triée reçoit la clé d'une fiche confidentielle plus ancienne. Le rapport du tri ne
-    # montre pas la clé, qui peut dire le sujet de la fiche.
-    m, k, fiches, _ = monde
-    (zotero.dossier / 'better-bibtex').mkdir()
-    poser_cle(zotero, serveur, fiches['projet'], 'secret2020', ajout='2010-01-01 00:00:00')
-    poser_cle(zotero, serveur, fiches['nouvelle'], 'secret2020')
-    zotero.tags(zotero.db.execute('select itemID from items where key = ?', (fiches['projet'],)).fetchone()[0],
+def test_sorting_without_bbt_does_not_report_keys(world, cfg, server, fake, zotero):
+    m, k, items, b = world
+    report, _ = i.prepare(b, cfg, services(cfg, fake), server.client(), reader.read_types(zotero.database))
+    assert 'sans clé de citation' not in report
+
+
+def test_key_shared_with_confidential_item(world, cfg, server, fake, zotero):
+    # D126, D188: the sorted reference receives the key of an older confidential item. The sort report does not
+    # show the key, which can reveal the subject of the item.
+    m, k, items, _ = world
+    (zotero.folder / 'better-bibtex').mkdir()
+    set_key(zotero, server, items['projet'], 'secret2020', date_added='2010-01-01 00:00:00')
+    set_key(zotero, server, items['nouvelle'], 'secret2020')
+    zotero.tags(zotero.db.execute('select itemID from items where key = ?', (items['projet'],)).fetchone()[0],
                 ['_privé'])
-    serveur.elements[fiches['projet']]['tags'] = [{'tag': '_privé'}]
-    plan, rapport = i.planifier(m.lire(), cfg, services(cfg, faux), serveur.client(), lecture.lire_types(zotero.base))
-    ops = [op for g in plan.groupes for op in g.operations if op.cle == fiches['nouvelle']]
-    assert any(op.apres.get('citationKey') == 'secret2020a' for op in ops)
-    assert 'secret2020' not in rapport
+    server.all_items[items['projet']]['tags'] = [{'tag': '_privé'}]
+    plan, report = i.make_plan(m.read(), cfg, services(cfg, fake), server.client(), reader.read_types(zotero.database))
+    ops = [op for g in plan.groups for op in g.operations if op.key == items['nouvelle']]
+    assert any(op.after.get('citationKey') == 'secret2020a' for op in ops)
+    assert 'secret2020' not in report
+
+
+def test_texts_in_english(world, cfg, server, fake, zotero):
+    m, k, items, b = world
+    fake.add(doi='10.1111/appr', title='Perceptual learning revisited', authors=(('Gibson', 'Eleanor'),),
+             year=2020, volume='12', **{'container-title': ['Cognition']})
+    fake.add(doi='10.1111/musee', title='Museum displays and their publics', authors=(('Durand', 'A'),), year=2020)
+    schema = reader.read_types(zotero.database)
+    with language('en'):
+        report, listing = i.prepare(b, cfg, services(cfg, fake), server.client(), schema)
+        assert '# Inbox sorting' in report and '2 in the Inbox and 1 without a place in the subjects' in report
+        assert 'neighbouring themes, same author: Psychologie/Perception (1)' in report
+        assert 'action “ajouter”, without depuis' in report and '**Duplicates.**' in report
+        plan, plan_report = i.make_plan(b, cfg, services(cfg, fake), server.client(), schema)
+        assert '# Inbox sorting' in plan_report and 'item(s) to modify' not in plan_report
+        assert 'to modify in' in plan_report

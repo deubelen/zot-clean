@@ -1,144 +1,143 @@
-"""Plans sur les collections (D114) : création sous une clé tirée par le plan, rangement, relance, annulation."""
+"""Plans on collections (D114): creation under a key drawn by the plan, filing, rerun, undo."""
 
 import hashlib
 import json
-from dataclasses import asdict
 
 import pytest
 
-from faux_serveur import FauxServeur
-from test_annulation import annuler
-from test_appliquer import ecrire
+from fake_server import FakeServer
+from test_undo import undo_plan
+from test_apply import write
 from zot_clean import journal, plans
-from zot_clean.appliquer import ESSAI, TOUT, appliquer
+from zot_clean.apply import TRIAL, ALL, apply_plan
 from zot_clean.config import Config
-from zot_clean.plans import Groupe, Operation, Plan
+from zot_clean.plans import Group, Operation, Plan
 
 
 @pytest.fixture
-def serveur():
-    return FauxServeur()
+def server():
+    return FakeServer()
 
 
 @pytest.fixture
 def cfg(tmp_path, zotero):
-    zotero.fiche('Une fiche')
-    zotero.enregistrer()
-    return Config(dossier_travail=tmp_path / 'travail', dossier_zotero=zotero.dossier)
+    zotero.item('Une fiche')
+    zotero.save()
+    return Config(workspace=tmp_path / 'travail', zotero_dir=zotero.folder)
 
 
-def creer(cle, nom, parent=False):
-    return Operation(cle, {}, {'name': nom, 'parentCollection': parent}, genre='collections', creation=True)
+def create(key, name, parent=False):
+    return Operation(key, {}, {'name': name, 'parentCollection': parent}, kind='collections', create=True)
 
 
-def plan_sous_theme(serveur):
-    """Un thème existant, renommé, un sous-thème créé, une fiche qui passe du thème au sous-thème."""
-    theme = serveur.collection('Ethologie')
-    fiche = serveur.ajouter(title='Cultures in chimpanzees', collections=[theme])
-    sous = 'PRIM2345'
-    g = Groupe('1', 'Éthologie/Primates', [
-        Operation(theme, {'name': 'Ethologie'}, {'name': 'Éthologie'}, genre='collections'),
-        creer(sous, 'Primates', theme),
-        Operation(fiche, {'collections': [theme]}, {'collections': [sous]}, rang=1)])
-    return Plan('fonds', serveur.utilisateur, [g]), theme, sous, fiche
+def subtheme_plan(server):
+    """An existing theme, renamed, a sub-theme created, an item moving from the theme to the sub-theme."""
+    theme = server.collection('Ethologie')
+    item = server.add(title='Cultures in chimpanzees', collections=[theme])
+    under = 'PRIM2345'
+    g = Group('1', 'Éthologie/Primates', [
+        Operation(theme, {'name': 'Ethologie'}, {'name': 'Éthologie'}, kind='collections'),
+        create(under, 'Primates', theme),
+        Operation(item, {'collections': [theme]}, {'collections': [under]}, rank=1)])
+    return Plan('fonds', server.user, [g]), theme, under, item
 
 
-def test_creation_et_rangement(serveur, cfg):
-    plan, theme, sous, fiche = plan_sous_theme(serveur)
-    chemin = ecrire(plan, cfg)
-    bilan = appliquer(plans.charger(chemin), chemin, serveur.client(), cfg, ESSAI)
-    assert bilan.faits == ['1'] and not bilan.conflits and not bilan.erreurs
-    assert serveur.collections[theme]['name'] == 'Éthologie'
-    assert (serveur.collections[sous]['name'], serveur.collections[sous]['parentCollection']) == ('Primates', theme)
-    assert serveur.elements[fiche]['collections'] == [sous]
-    lignes = [l for l in journal.lire(bilan.journal) if l['type'] == 'element']
-    assert [(l.get('genre', 'items'), l.get('cree', False)) for l in lignes] == [
+def test_create_and_filing(server, cfg):
+    plan, theme, under, item = subtheme_plan(server)
+    path = write(plan, cfg)
+    outcome = apply_plan(plans.load(path), path, server.client(), cfg, TRIAL)
+    assert outcome.done == ['1'] and not outcome.conflicts and not outcome.errors
+    assert server.collections[theme]['name'] == 'Éthologie'
+    assert (server.collections[under]['name'], server.collections[under]['parentCollection']) == ('Primates', theme)
+    assert server.all_items[item]['collections'] == [under]
+    lines = [l for l in journal.read(outcome.journal) if l['type'] == 'element']
+    assert [(l.get('genre', 'items'), l.get('cree', False)) for l in lines] == [
         ('collections', False), ('collections', True), ('items', False)]
-    # Relancer ne refait rien, le groupe est fait.
-    assert appliquer(plan, chemin, serveur.client(), cfg, TOUT).journal is None
+    # Rerunning does nothing, the group is done.
+    assert apply_plan(plan, path, server.client(), cfg, ALL).journal is None
 
 
-def test_collection_deja_creee_par_une_execution_interrompue(serveur, cfg):
-    plan, theme, sous, fiche = plan_sous_theme(serveur)
-    serveur.collection('Primates', theme, key=sous)
-    chemin = ecrire(plan, cfg)
-    bilan = appliquer(plan, chemin, serveur.client(), cfg, ESSAI)
-    assert bilan.faits == ['1'] and serveur.elements[fiche]['collections'] == [sous]
+def test_collection_already_created_by_interrupted_run(server, cfg):
+    plan, theme, under, item = subtheme_plan(server)
+    server.collection('Primates', theme, key=under)
+    path = write(plan, cfg)
+    outcome = apply_plan(plan, path, server.client(), cfg, TRIAL)
+    assert outcome.done == ['1'] and server.all_items[item]['collections'] == [under]
 
 
-def test_cle_deja_prise_par_une_autre_collection(serveur, cfg):
-    plan, theme, sous, fiche = plan_sous_theme(serveur)
-    serveur.collection('Autre chose', key=sous)
-    chemin = ecrire(plan, cfg)
-    bilan = appliquer(plan, chemin, serveur.client(), cfg, ESSAI)
-    assert '1' in bilan.conflits and 'existe déjà' in bilan.conflits['1']
-    assert serveur.elements[fiche]['collections'] == [theme]
+def test_key_already_taken_by_another_collection(server, cfg):
+    plan, theme, under, item = subtheme_plan(server)
+    server.collection('Autre chose', key=under)
+    path = write(plan, cfg)
+    outcome = apply_plan(plan, path, server.client(), cfg, TRIAL)
+    assert '1' in outcome.conflicts and 'existe déjà' in outcome.conflicts['1']
+    assert server.all_items[item]['collections'] == [theme]
 
 
-def test_annulation_remet_la_fiche_et_met_la_collection_creee_a_la_corbeille(serveur, cfg):
-    plan, theme, sous, fiche = plan_sous_theme(serveur)
-    chemin = ecrire(plan, cfg)
-    appliquer(plan, chemin, serveur.client(), cfg, ESSAI)
-    plan_a, rapport, chemin_a = annuler(chemin, serveur, cfg)
-    assert [op.genre for op in plan_a.groupes[0].operations] == ['items', 'collections', 'collections']
-    assert 'Primates' in rapport
-    bilan = appliquer(plan_a, chemin_a, serveur.client(), cfg, ESSAI)
-    assert bilan.faits == ['1']
-    assert serveur.elements[fiche]['collections'] == [theme]
-    assert serveur.collections[sous]['deleted'] is True
-    assert serveur.collections[theme]['name'] == 'Ethologie'
+def test_undo_restores_the_item_and_trashes_the_created_collection(server, cfg):
+    plan, theme, under, item = subtheme_plan(server)
+    path = write(plan, cfg)
+    apply_plan(plan, path, server.client(), cfg, TRIAL)
+    plan_a, report, path_a = undo_plan(path, server, cfg)
+    assert [op.kind for op in plan_a.groups[0].operations] == ['items', 'collections', 'collections']
+    assert 'Primates' in report
+    outcome = apply_plan(plan_a, path_a, server.client(), cfg, TRIAL)
+    assert outcome.done == ['1']
+    assert server.all_items[item]['collections'] == [theme]
+    assert server.collections[under]['deleted'] is True
+    assert server.collections[theme]['name'] == 'Ethologie'
 
 
-def test_fiche_vers_une_collection_inexistante_refusee(serveur, cfg):
-    theme = serveur.collection('Thème')
-    fiche = serveur.ajouter(title='Titre', collections=[theme])
-    plan = Plan('fonds', serveur.utilisateur, [Groupe('1', 'x', [
-        Operation(fiche, {'collections': [theme]}, {'collections': ['NULLE234']})])])
-    bilan = appliquer(plan, ecrire(plan, cfg), serveur.client(), cfg, ESSAI)
-    assert '1' in bilan.erreurs and serveur.elements[fiche]['collections'] == [theme]
+def test_item_to_nonexistent_collection_rejected(server, cfg):
+    theme = server.collection('Thème')
+    item = server.add(title='Titre', collections=[theme])
+    plan = Plan('fonds', server.user, [Group('1', 'x', [
+        Operation(item, {'collections': [theme]}, {'collections': ['NULLE234']})])])
+    outcome = apply_plan(plan, write(plan, cfg), server.client(), cfg, TRIAL)
+    assert '1' in outcome.errors and server.all_items[item]['collections'] == [theme]
 
 
-def test_empreinte_des_anciens_plans_inchangee():
-    """Les champs ajoutés pour les collections, à leur valeur par défaut, n'entrent pas dans l'empreinte."""
-    plan = Plan('test', 1, [Groupe('1', 't', [Operation('ABCD2345', {'title': 'a'}, {'title': 'b'})])])
-    ancien = [{k: v for k, v in asdict(g).items()} for g in plan.groupes]
-    for g in ancien:
+def test_fingerprint_of_old_plans_unchanged():
+    """The fields added for collections, at their default value, do not enter the fingerprint."""
+    plan = Plan('test', 1, [Group('1', 't', [Operation('ABCD2345', {'title': 'a'}, {'title': 'b'})])])
+    old = [plans._stored_group(g) for g in plan.groups]  # keys of the file (D209)
+    for g in old:
         g['operations'] = [{k: v for k, v in o.items() if k not in ('genre', 'creation', 'enfants', 'exige')} for o in g['operations']]
-    contenu = {'etape': 'test', 'bibliotheque': 1, 'partiel': False, 'groupes': ancien}
-    attendu = hashlib.sha256(json.dumps(contenu, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:12]
-    assert plan.empreinte == attendu
+    content = {'etape': 'test', 'bibliotheque': 1, 'partiel': False, 'groupes': old}
+    expected = hashlib.sha256(json.dumps(content, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:12]
+    assert plan.fingerprint == expected
 
 
-def test_annulation_rejoue_les_groupes_du_dernier_au_premier(serveur, cfg):
-    """Une collection créée par un groupe et une autre déplacée dedans par un groupe suivant : l'annulation sort
-    d'abord la seconde, puis met la première à la corbeille (trouvé par l'essai sur le compte de test)."""
-    ancienne = serveur.collection('Vieux classement')
+def test_undo_replays_groups_from_last_to_first(server, cfg):
+    """A collection created by one group and another moved into it by a later group: the undo takes out
+    the second first, then sends the first to the trash (found by the trial on the test account)."""
+    former = server.collection('Vieux classement')
     archives = 'ARCH2345'
-    plan = Plan('fonds', serveur.utilisateur, [
-        Groupe('1', 'Archives', [creer(archives, 'Archives')]),
-        Groupe('2', 'Archives/Vieux classement', [
-            Operation(ancienne, {'parentCollection': False}, {'parentCollection': archives}, genre='collections')])])
-    chemin = ecrire(plan, cfg)
-    appliquer(plan, chemin, serveur.client(), cfg, ESSAI)
-    plan_a, _, _ = annuler(chemin, serveur, cfg)
-    assert [g.id for g in plan_a.groupes] == ['2', '1']
+    plan = Plan('fonds', server.user, [
+        Group('1', 'Archives', [create(archives, 'Archives')]),
+        Group('2', 'Archives/Vieux classement', [
+            Operation(former, {'parentCollection': False}, {'parentCollection': archives}, kind='collections')])])
+    path = write(plan, cfg)
+    apply_plan(plan, path, server.client(), cfg, TRIAL)
+    plan_a, _, _ = undo_plan(path, server, cfg)
+    assert [g.id for g in plan_a.groups] == ['2', '1']
 
 
-@pytest.mark.parametrize('retouche', ['renommee', 'fiche ajoutee', 'sous-collection'])
-def test_annulation_garde_une_collection_creee_reprise_depuis(serveur, cfg, retouche):
-    # D183 : une collection créée par la passe, renommée ou remplie depuis par l'utilisateur, reste en place. Le
-    # reste de la passe est défait.
-    plan, theme, sous, fiche = plan_sous_theme(serveur)
-    chemin = ecrire(plan, cfg)
-    appliquer(plan, chemin, serveur.client(), cfg, ESSAI)
-    if retouche == 'renommee':
-        serveur.collections[sous]['name'] = 'Projet ajouté à la main'
-    elif retouche == 'fiche ajoutee':
-        serveur.ajouter(title='Ajoutée à la main', collections=[sous])
+@pytest.mark.parametrize('tweak', ['renommee', 'fiche ajoutee', 'sous-collection'])
+def test_undo_keeps_a_created_collection_changed_since(server, cfg, tweak):
+    # D183 : a collection created by the pass, since renamed or filled by the user, stays in place. The
+    # rest of the pass is undone.
+    plan, theme, under, item = subtheme_plan(server)
+    path = write(plan, cfg)
+    apply_plan(plan, path, server.client(), cfg, TRIAL)
+    if tweak == 'renommee':
+        server.collections[under]['name'] = 'Projet ajouté à la main'
+    elif tweak == 'fiche ajoutee':
+        server.add(title='Ajoutée à la main', collections=[under])
     else:
-        serveur.collection('Ajoutée à la main', sous)
-    plan_a, _, chemin_a = annuler(chemin, serveur, cfg)
-    bilan = appliquer(plan_a, chemin_a, serveur.client(), cfg, ESSAI)
-    assert sous in bilan.conflits['1'] and bilan.arretes['1']
-    assert not serveur.collections[sous].get('deleted')
-    assert serveur.elements[fiche]['collections'] == [theme]
+        server.collection('Ajoutée à la main', under)
+    plan_a, _, path_a = undo_plan(path, server, cfg)
+    outcome = apply_plan(plan_a, path_a, server.client(), cfg, TRIAL)
+    assert under in outcome.conflicts['1'] and outcome.stopped['1']
+    assert not server.collections[under].get('deleted')
+    assert server.all_items[item]['collections'] == [theme]

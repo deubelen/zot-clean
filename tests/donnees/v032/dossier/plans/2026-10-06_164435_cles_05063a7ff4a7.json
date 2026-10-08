@@ -1,0 +1,113 @@
+{
+ "format": 2,
+ "empreinte": "05063a7ff4a7",
+ "etape": "cles",
+ "bibliotheque": 4242,
+ "groupes": [
+  {
+   "id": "double-2222UUB4",
+   "titre": "Durand2020",
+   "operations": [
+    {
+     "cle": "2222UUB3",
+     "avant": {
+      "citationKey": "durand2020"
+     },
+     "apres": {
+      "citationKey": "Durand2020a"
+     },
+     "rang": 0,
+     "nature": "suffixe",
+     "genre": "items",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    },
+    {
+     "cle": "2222UUB5",
+     "avant": {
+      "citationKey": "durand2020"
+     },
+     "apres": {
+      "citationKey": "Durand2020b"
+     },
+     "rang": 0,
+     "nature": "suffixe",
+     "genre": "items",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  },
+  {
+   "id": "2222UUB6",
+   "titre": "Durand, 2020, Article E",
+   "operations": [
+    {
+     "cle": "2222UUB6",
+     "avant": {
+      "citationKey": "",
+      "extra": "tex.ids: vieux\nCitation Key: martin2019"
+     },
+     "apres": {
+      "citationKey": "martin2019",
+      "extra": "tex.ids: vieux"
+     },
+     "rang": 0,
+     "nature": "Extra vers le champ natif",
+     "genre": "items",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  },
+  {
+   "id": "2222UUB7",
+   "titre": "Durand, 2020, Article F",
+   "operations": [
+    {
+     "cle": "2222UUB7",
+     "avant": {
+      "extra": "Citation Key: lee2018"
+     },
+     "apres": {
+      "extra": ""
+     },
+     "rang": 0,
+     "nature": "ligne d'Extra retirée",
+     "genre": "items",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  },
+  {
+   "id": "2222UUB8",
+   "titre": "Durand, 2020, Article G",
+   "operations": [
+    {
+     "cle": "2222UUB8",
+     "avant": {
+      "extra": "Citation Key: park2017"
+     },
+     "apres": {
+      "extra": ""
+     },
+     "rang": 0,
+     "nature": "ligne d'Extra retirée",
+     "genre": "items",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  }
+ ],
+ "description": "Clés de citation, 4 groupe(s).",
+ "partiel": false,
+ "annule": [],
+ "cree": "2026-10-06T16:44:35+02:00"
+}

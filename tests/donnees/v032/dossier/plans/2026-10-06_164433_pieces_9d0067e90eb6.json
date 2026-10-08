@@ -1,0 +1,90 @@
+{
+ "format": 2,
+ "empreinte": "9d0067e90eb6",
+ "etape": "pieces",
+ "bibliotheque": 4242,
+ "groupes": [
+  {
+   "id": "1",
+   "titre": "grant.pdf",
+   "operations": [
+    {
+     "cle": "2222UUBB",
+     "avant": {
+      "deleted": false
+     },
+     "apres": {
+      "deleted": true
+     },
+     "rang": 0,
+     "nature": "corbeille",
+     "genre": "items",
+     "creation": false,
+     "enfants": [],
+     "exige": null
+    }
+   ]
+  },
+  {
+   "id": "2",
+   "titre": "v.pdf",
+   "operations": [
+    {
+     "cle": "2222UUBD",
+     "avant": {
+      "deleted": false
+     },
+     "apres": {
+      "deleted": true
+     },
+     "rang": 0,
+     "nature": "corbeille",
+     "genre": "items",
+     "creation": false,
+     "enfants": [],
+     "exige": null
+    }
+   ]
+  },
+  {
+   "id": "3",
+   "titre": "a.pdf",
+   "operations": [
+    {
+     "cle": "2222UUBG",
+     "avant": {
+      "deleted": false
+     },
+     "apres": {
+      "deleted": true
+     },
+     "rang": 0,
+     "nature": "corbeille",
+     "genre": "items",
+     "creation": false,
+     "enfants": [],
+     "exige": null
+    },
+    {
+     "cle": "2222UUBH",
+     "avant": {
+      "parentItem": "2222UUB9"
+     },
+     "apres": {
+      "parentItem": "2222UUB8"
+     },
+     "rang": 0,
+     "nature": "rattacher",
+     "genre": "items",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  }
+ ],
+ "description": "PDF identiques, 3 groupe(s).",
+ "partiel": false,
+ "annule": [],
+ "cree": "2026-10-06T16:44:33+02:00"
+}

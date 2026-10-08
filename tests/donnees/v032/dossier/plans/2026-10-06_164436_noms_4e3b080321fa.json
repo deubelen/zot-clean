@@ -1,0 +1,100 @@
+{
+ "format": 2,
+ "empreinte": "4e3b080321fa",
+ "etape": "noms",
+ "bibliotheque": 4242,
+ "groupes": [
+  {
+   "id": "2222UUB9",
+   "titre": "Autre retard",
+   "operations": [
+    {
+     "cle": "2222UUBA",
+     "avant": {
+      "filename": "x.pdf"
+     },
+     "apres": {
+      "filename": "Durand - 2020 - Autre retard.pdf"
+     },
+     "rang": 0,
+     "nature": "nom du fichier",
+     "genre": "items",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  },
+  {
+   "id": "2222UUB7",
+   "titre": "casse",
+   "operations": [
+    {
+     "cle": "2222UUB8",
+     "avant": {
+      "filename": "Durand - 2020 - Casse.pdf"
+     },
+     "apres": {
+      "filename": "Durand - 2020 - casse.pdf"
+     },
+     "rang": 0,
+     "nature": "nom du fichier",
+     "genre": "items",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  },
+  {
+   "id": "2222UUB5",
+   "titre": "Deux PDF",
+   "operations": [
+    {
+     "cle": "2222UUB6",
+     "avant": {
+      "filename": "article.pdf",
+      "title": "ARTICLE"
+     },
+     "apres": {
+      "filename": "Durand - 2020 - Deux PDF.pdf",
+      "title": "PDF"
+     },
+     "rang": 0,
+     "nature": "nom du fichier",
+     "genre": "items",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  },
+  {
+   "id": "2222UUB3",
+   "titre": "Titre court",
+   "operations": [
+    {
+     "cle": "2222UUB4",
+     "avant": {
+      "filename": "scan.pdf",
+      "title": "scan.pdf"
+     },
+     "apres": {
+      "filename": "Durand - 2020 - Titre court.pdf",
+      "title": "PDF"
+     },
+     "rang": 0,
+     "nature": "nom du fichier",
+     "genre": "items",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  }
+ ],
+ "description": "Noms des fichiers, 4 fichiers à renommer.",
+ "partiel": false,
+ "annule": [],
+ "cree": "2026-10-06T16:44:36+02:00"
+}

@@ -1,0 +1,65 @@
+# Décisions de rangement fiche par fiche, lues par `zc fonds planifier` et `zc inbox planifier`.
+# Ce fichier se relit et se modifie à la main ou avec l'agent. `zc fonds a-ranger` y ajoute les propositions
+# tirées des tags reliés à un thème, sans toucher aux entrées existantes.
+#
+# Une table [[fiche]] par décision, une seule par fiche en général (une seconde pour « ajouter » une autre place).
+# cle      : clé de la fiche, donnée par les rapports (`zc fonds a-ranger`, `zc inbox preparer`).
+# action   : "déplacer" (vers `cible`, en quittant `depuis`), "ajouter" (dans `cible`, sans rien quitter),
+#            "corbeille" (la fiche va à la corbeille de Zotero).
+# cible    : chemin du plan, sans la racine du fonds (« Philosophie/Philosophie des sciences »).
+# depuis   : clé de la collection quittée, celle que le rapport donne pour le paquet. Vide, la fiche quitte les
+#            thèmes du fonds qui contiennent la cible. Pour une fiche hors de toute collection, `depuis` reste vide,
+#            et « déplacer » ou « ajouter » reviennent au même. Une fiche d'un projet reçoit « ajouter » et y reste.
+# source   : "agent", "tag" ou "consigne" (demande de l'utilisateur).
+# decision : "" (proposé), "accepter" ou "refuser". Seules les entrées acceptées entrent dans le plan.
+# note     : libre, une phrase qui justifie la proposition.
+#
+# Exemple, à recopier sans les dièses :
+# [[fiche]]
+# cle = "ABCD2345"
+# action = "déplacer"
+# cible = "Psychologie/Perception"
+# depuis = "WXYZ6789"
+# source = "agent"
+# decision = ""
+# note = "Psychophysique des couleurs, dans les « Inclut » de Perception."
+
+[[fiche]]
+# Durand, 2020, Learning to see · 20 Cours/Psy L1, 40 Fonds/Psychologie/Perception
+cle = "2222UUBF"
+action = "déplacer"
+cible = "Psychologie/Perception/Apprentissage perceptif"
+depuis = ""
+source = "agent"
+decision = "accepter"
+note = ""
+
+[[fiche]]
+# Durand, 2020, Introducing HTML5 · 40 Fonds/Arts
+cle = "2222UUBL"
+action = "corbeille"
+cible = ""
+depuis = ""
+source = "consigne"
+decision = "accepter"
+note = ""
+
+[[fiche]]
+# Durand, 2020, Perceptual learning · 40 Fonds/Psychologie/Perception
+cle = "2222UUBG"
+action = "ajouter"
+cible = "Psychologie/Perception"
+depuis = ""
+source = "agent"
+decision = "refuser"
+note = "reste aussi dans Perception"
+
+[[fiche]]
+# Durand, 2020, Perceptual expertise · 40 Fonds/Psychologie/Perception
+cle = "2222UUBH"
+action = "déplacer"
+cible = "Psychologie/Perception/Apprentissage perceptif"
+depuis = "2222UUB9"
+source = "tag"
+decision = "accepter"
+note = "tag « apprentissage visuel »"

@@ -1,0 +1,61 @@
+{
+ "empreinte": "adec3423f0fb9e698734868069058cb8c6f00350e09d85a603301a2796d6bfe8",
+ "date": "2026-10-06T16:44:37",
+ "structure": {
+  "plan": [
+   "Arts",
+   "Psychologie",
+   "Psychologie/Perception",
+   "Psychologie/Perception/Apprentissage perceptif",
+   "Psychologie/Émotion"
+  ],
+  "collections": {
+   "2222UUBE": [
+    "projet",
+    "20 Cours/Psy L1",
+    []
+   ],
+   "2222UUBB": [
+    "thème",
+    "Arts",
+    []
+   ],
+   "2222UUBC": [
+    "thème",
+    "Arts",
+    []
+   ],
+   "2222UUB8": [
+    "thème",
+    "Psychologie",
+    []
+   ],
+   "2222UUB9": [
+    "répartir",
+    "",
+    [
+     "Psychologie/Perception",
+     "Psychologie/Perception/Apprentissage perceptif"
+    ]
+   ],
+   "2222UUBA": [
+    "thème",
+    "Psychologie/Émotion",
+    []
+   ],
+   "2222UUB7": [
+    "dissoudre",
+    "",
+    []
+   ],
+   "2222UUBD": [
+    "archives",
+    "",
+    []
+   ]
+  },
+  "tags": {
+   "apprentissage visuel": "Psychologie/Perception/Apprentissage perceptif"
+  }
+ }
+}

@@ -1,0 +1,41 @@
+{
+ "format": 2,
+ "empreinte": "6c8e6b64e3a2",
+ "etape": "types",
+ "bibliotheque": 4242,
+ "groupes": [
+  {
+   "id": "2222UUB5",
+   "titre": "Perception and action in the embodied mind",
+   "operations": [
+    {
+     "cle": "2222UUB5",
+     "avant": {
+      "itemType": "journalArticle",
+      "publicationTitle": "Handbook of embodied cognition",
+      "bookTitle": "",
+      "issue": "4",
+      "extra": ""
+     },
+     "apres": {
+      "itemType": "bookSection",
+      "publicationTitle": "",
+      "bookTitle": "Handbook of embodied cognition",
+      "issue": "",
+      "extra": "issue : 4"
+     },
+     "rang": 0,
+     "nature": "Article de revue → Chapitre de livre d'après crossref (crossref : « Perception and action in the embodied mind », Petit, 2015, Chapitre de livre (similarité 1.00)). Transférés : publicationTitle → bookTitle. Recopiés dans extra : issue",
+     "genre": "items",
+     "creation": false,
+     "enfants": null,
+     "exige": null
+    }
+   ]
+  }
+ ],
+ "description": "Types de fiche corrigés d'après la source du DOI.",
+ "partiel": false,
+ "annule": [],
+ "cree": "2026-10-06T16:44:34+02:00"
+}

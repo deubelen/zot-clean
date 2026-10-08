@@ -1,8 +1,8 @@
-"""Bibliothèque Zotero synthétique pour les tests (D29).
+"""Synthetic Zotero library for the tests (D29).
 
-`zotero` fournit un dossier Zotero factice (base créée à partir du schéma réel,
-dossier `storage/`) et des méthodes pour y ajouter collections, fiches, pièces
-jointes et notes. Aucune donnée personnelle.
+`zotero` provides a fake Zotero folder (database created from the real schema,
+`storage/` folder) and methods to add collections, items, attachments
+and notes to it. No personal data.
 """
 
 import itertools
@@ -16,76 +16,76 @@ SCHEMA = Path(__file__).parent / 'donnees' / 'schema_zotero.sql'
 
 
 @pytest.fixture(autouse=True)
-def sans_time_machine(monkeypatch):
-    """Les tests ne touchent jamais aux réglages de Time Machine de la machine (D159)."""
-    from zot_clean import sauvegarde
-    monkeypatch.setattr(sauvegarde, '_tmutil', lambda commande: None)
+def no_time_machine(monkeypatch):
+    """The tests never touch the machine's Time Machine settings (D159)."""
+    from zot_clean import backup
+    monkeypatch.setattr(backup, '_tmutil', lambda command: None)
 ALPHABET = '23456789ABCDEFGHIJKLMNPQRSTUVWXYZ'
 
 
-class ZoteroFactice:
-    def __init__(self, dossier: Path, modele: Path):
-        self.dossier = dossier
-        dossier.mkdir(parents=True)
-        self.base = dossier / 'zotero.sqlite'
-        # Copie d'une base vide construite une fois par session : recréer le schéma à chaque test coûte
-        # plusieurs secondes sous Windows, qui synchronise le disque après chaque instruction.
-        shutil.copyfile(modele, self.base)
-        self.db = sqlite3.connect(self.base)
+class FakeZotero:
+    def __init__(self, folder: Path, template: Path):
+        self.folder = folder
+        folder.mkdir(parents=True)
+        self.database = folder / 'zotero.sqlite'
+        # Copy of an empty database built once per session: recreating the schema at each test costs
+        # several seconds on Windows, which syncs the disk after each statement.
+        shutil.copyfile(template, self.database)
+        self.db = sqlite3.connect(self.database)
         self._ids = itertools.count(1)
-        self.compte(4242)  # celui du faux serveur, `FauxServeur().utilisateur`
+        self.account(4242)  # that of the fake server, `FakeServer().user`
 
-    def _cle(self, n: int) -> str:
-        cle = ''
+    def _key(self, n: int) -> str:
+        key = ''
         for _ in range(8):
             n, r = divmod(n, len(ALPHABET))
-            cle = ALPHABET[r] + cle
-        return cle
+            key = ALPHABET[r] + key
+        return key
 
-    def _type(self, nom: str) -> int:
-        return self.db.execute('select itemTypeID from itemTypes where typeName = ?', (nom,)).fetchone()[0]
+    def _type(self, name: str) -> int:
+        return self.db.execute('select itemTypeID from itemTypes where typeName = ?', (name,)).fetchone()[0]
 
-    def _element(self, type_: str, cle: str | None = None, synced: bool = True, lib: int = 1,
-                 ajout: str = '2026-01-01') -> tuple[int, str]:
+    def _item(self, type_: str, key: str | None = None, synced: bool = True, lib: int = 1,
+                 date_added: str = '2026-01-01') -> tuple[int, str]:
         iid = next(self._ids)
-        cle = cle or self._cle(iid)
+        key = key or self._key(iid)
         self.db.execute('insert into items (itemID, itemTypeID, libraryID, key, synced, dateAdded) '
-                        'values (?, ?, ?, ?, ?, ?)', (iid, self._type(type_), lib, cle, int(synced), ajout))
-        return iid, cle
+                        'values (?, ?, ?, ?, ?, ?)', (iid, self._type(type_), lib, key, int(synced), date_added))
+        return iid, key
 
-    def _champs(self, iid: int, champs: dict[str, str]) -> None:
-        for nom, valeur in champs.items():
-            if valeur:
-                fid = self.db.execute('select fieldID from fields where fieldName = ?', (nom,)).fetchone()[0]
-                # Chaque valeur n'est stockée qu'une fois, partagée entre les fiches.
-                ligne = self.db.execute('select valueID from itemDataValues where value = ?', (valeur,)).fetchone()
-                vid = ligne[0] if ligne else next(self._ids)
-                if not ligne:
-                    self.db.execute('insert into itemDataValues (valueID, value) values (?, ?)', (vid, valeur))
+    def _fields(self, iid: int, fields: dict[str, str]) -> None:
+        for name, value in fields.items():
+            if value:
+                fid = self.db.execute('select fieldID from fields where fieldName = ?', (name,)).fetchone()[0]
+                # Each value is stored only once, shared between items.
+                line = self.db.execute('select valueID from itemDataValues where value = ?', (value,)).fetchone()
+                vid = line[0] if line else next(self._ids)
+                if not line:
+                    self.db.execute('insert into itemDataValues (valueID, value) values (?, ?)', (vid, value))
                 self.db.execute('insert into itemData values (?, ?, ?)', (iid, fid, vid))
 
-    def collection(self, nom: str, parent: int | None = None, cle: str | None = None) -> int:
+    def collection(self, name: str, parent: int | None = None, key: str | None = None) -> int:
         cid = next(self._ids)
         self.db.execute('insert into collections (collectionID, collectionName, parentCollectionID, libraryID, key, synced) '
-                        'values (?, ?, ?, 1, ?, 1)', (cid, nom, parent, cle or self._cle(cid)))
+                        'values (?, ?, ?, 1, ?, 1)', (cid, name, parent, key or self._key(cid)))
         return cid
 
-    def fiche(self, titre: str, type_: str = 'journalArticle', auteurs: tuple[str, ...] = ('Durand',),
+    def item(self, title: str, type_: str = 'journalArticle', authors: tuple[str, ...] = ('Durand',),
               date: str = '2020', collections: tuple[int, ...] = (), tags: tuple[tuple[str, int] | str, ...] = (),
-              editeurs: tuple[str, ...] = (), createurs: tuple[tuple[str, str, str], ...] = (), **champs) -> int:
-        """`date` est stockée telle quelle : une année seule devient une date multipart, comme dans Zotero.
-        `createurs` : (nom, prénom, rôle) ajoutés après les directeurs et les auteurs."""
-        iid, _ = self._element(type_, champs.pop('cle', None), champs.pop('synced', True), champs.pop('lib', 1),
-                               champs.pop('ajout', '2026-01-01'))
+              editors: tuple[str, ...] = (), creators: tuple[tuple[str, str, str], ...] = (), **fields) -> int:
+        """`date` is stored as is: a lone year becomes a multipart date, as in Zotero.
+        `creators`: (last name, first name, role) added after the editors and the authors."""
+        iid, _ = self._item(type_, fields.pop('key', None), fields.pop('synced', True), fields.pop('lib', 1),
+                               fields.pop('date_added', '2026-01-01'))
         if date and len(date) == 4 and date.isdigit():
             date = f'{date}-00-00 {date}'
-        self._champs(iid, dict(champs, title=titre, date=date))
-        # Directeurs d'ouvrage saisis avant les auteurs, comme le fait souvent Zotero pour un chapitre.
-        liste = [(n, 'A.', 'editor') for n in editeurs] + [(n, 'A.', 'author') for n in auteurs] + list(createurs)
-        for i, (nom, prenom, role) in enumerate(liste):
+        self._fields(iid, dict(fields, title=title, date=date))
+        # Book editors entered before the authors, as Zotero often does for a chapter.
+        listing = [(n, 'A.', 'editor') for n in editors] + [(n, 'A.', 'author') for n in authors] + list(creators)
+        for i, (name, first_name, role) in enumerate(listing):
             cid = next(self._ids)
             rid = self.db.execute('select creatorTypeID from creatorTypes where creatorType = ?', (role,)).fetchone()[0]
-            self.db.execute('insert into creators (creatorID, firstName, lastName) values (?, ?, ?)', (cid, prenom, nom))
+            self.db.execute('insert into creators (creatorID, firstName, lastName) values (?, ?, ?)', (cid, first_name, name))
             self.db.execute('insert into itemCreators (itemID, creatorID, creatorTypeID, orderIndex) values (?, ?, ?, ?)',
                             (iid, cid, rid, i))
         for col in collections:
@@ -94,113 +94,113 @@ class ZoteroFactice:
         return iid
 
     def tags(self, iid: int, tags) -> None:
-        """Pose des tags, chacun un nom (manuel) ou un couple (nom, type), 1 pour automatique."""
+        """Sets tags, each a name (manual) or a pair (name, type), 1 for automatic."""
         for tag in tags:
-            nom, typ = (tag, 0) if isinstance(tag, str) else tag
-            ligne = self.db.execute('select tagID from tags where name = ?', (nom,)).fetchone()
-            tid = ligne[0] if ligne else next(self._ids)
-            if not ligne:
-                self.db.execute('insert into tags (tagID, name) values (?, ?)', (tid, nom))
+            name, typ = (tag, 0) if isinstance(tag, str) else tag
+            line = self.db.execute('select tagID from tags where name = ?', (name,)).fetchone()
+            tid = line[0] if line else next(self._ids)
+            if not line:
+                self.db.execute('insert into tags (tagID, name) values (?, ?)', (tid, name))
             self.db.execute('insert into itemTags values (?, ?, ?)', (iid, tid, typ))
 
-    def couleur(self, nom: str, couleur: str = '#990000') -> None:
-        """Tag coloré, ajouté à la fin du réglage synchronisé `tagColors`."""
+    def color(self, name: str, color: str = '#990000') -> None:
+        """Coloured tag, appended to the synchronised `tagColors` setting."""
         import json
-        ligne = self.db.execute("select value from syncedSettings where setting = 'tagColors' and libraryID = 1").fetchone()
-        valeur = json.loads(ligne[0]) if ligne else []
-        valeur.append({'name': nom, 'color': couleur})
-        self.reglage('tagColors', valeur)
+        line = self.db.execute("select value from syncedSettings where setting = 'tagColors' and libraryID = 1").fetchone()
+        value = json.loads(line[0]) if line else []
+        value.append({'name': name, 'color': color})
+        self.setting('tagColors', value)
 
-    def recherche(self, nom: str, tag: str, operateur: str = 'is') -> int:
-        """Recherche enregistrée avec une condition sur un tag."""
+    def search(self, name: str, tag: str, operator: str = 'is') -> int:
+        """Saved search with a condition on a tag."""
         sid = next(self._ids)
         self.db.execute('insert into savedSearches (savedSearchID, savedSearchName, libraryID, key) values (?, ?, 1, ?)',
-                        (sid, nom, self._cle(sid)))
+                        (sid, name, self._key(sid)))
         self.db.execute('insert into savedSearchConditions (savedSearchID, searchConditionID, condition, operator, value) '
-                        "values (?, 0, 'tag', ?, ?)", (sid, operateur, tag))
+                        "values (?, 0, 'tag', ?, ?)", (sid, operator, tag))
         return sid
 
-    def pdf(self, parent: int, nom: str, contenu: bytes | None = b'%PDF-1.4 factice', cle: str | None = None,
-            ajout: str = '2026-01-01', type_contenu: str = 'application/pdf', mode: int = 0, url: str = '',
-            titre: str = '', autres: tuple[str, ...] = (), tags=(), note: str = '') -> int:
-        """Pièce jointe importée (`mode` 0), importée depuis une URL (1), liée (2) ou lien (3). `contenu=None` :
-        fichier absent du disque. `autres` : autres fichiers posés dans son dossier `storage/<CLÉ>/`. `note` : note
-        propre de la pièce jointe, que Zotero range dans `itemNotes` sans parent, enveloppée comme toute note."""
-        iid, cle = self._element('attachment', cle, ajout=ajout)
+    def pdf(self, parent: int, name: str, content: bytes | None = b'%PDF-1.4 factice', key: str | None = None,
+            date_added: str = '2026-01-01', content_type: str = 'application/pdf', mode: int = 0, url: str = '',
+            title: str = '', others: tuple[str, ...] = (), tags=(), note: str = '') -> int:
+        """Attachment imported (`mode` 0), imported from a URL (1), linked (2) or link (3). `content=None`:
+        file absent from the disk. `others`: other files placed in its `storage/<KEY>/` folder. `note`: the
+        attachment's own note, which Zotero stores in `itemNotes` without a parent, wrapped like any note."""
+        iid, key = self._item('attachment', key, date_added=date_added)
         self.tags(iid, tags)
         self.db.execute('insert into itemNotes (itemID, parentItemID, note) values (?, null, ?)',
                         (iid, f'<div class="zotero-note znv1">{note}</div>'))
-        chemin = f'/Documents/{nom}' if mode == 2 else ('' if mode == 3 else f'storage:{nom}')
+        path = f'/Documents/{name}' if mode == 2 else ('' if mode == 3 else f'storage:{name}')
         self.db.execute('insert into itemAttachments (itemID, parentItemID, linkMode, contentType, path) '
-                        'values (?, ?, ?, ?, ?)', (iid, parent, mode, type_contenu, chemin))
-        self._champs(iid, {'url': url, 'title': titre})
-        if mode in (0, 1) and (contenu is not None or autres):
-            (self.dossier / 'storage' / cle).mkdir(parents=True)
-            if contenu is not None:
-                (self.dossier / 'storage' / cle / nom).write_bytes(contenu)
-            for autre in autres:
-                (self.dossier / 'storage' / cle / autre).write_bytes(b'autre')
+                        'values (?, ?, ?, ?, ?)', (iid, parent, mode, content_type, path))
+        self._fields(iid, {'url': url, 'title': title})
+        if mode in (0, 1) and (content is not None or others):
+            (self.folder / 'storage' / key).mkdir(parents=True)
+            if content is not None:
+                (self.folder / 'storage' / key / name).write_bytes(content)
+            for other in others:
+                (self.folder / 'storage' / key / other).write_bytes(b'autre')
         return iid
 
-    def reglage(self, nom: str, valeur) -> None:
-        """Réglage synchronisé de la bibliothèque (`syncedSettings`), stocké en JSON comme le fait Zotero."""
+    def setting(self, name: str, value) -> None:
+        """Synchronised library setting (`syncedSettings`), stored as JSON as Zotero does."""
         import json
         self.db.execute('insert or replace into syncedSettings (setting, libraryID, value, version, synced) '
-                        'values (?, 1, ?, 0, 1)', (nom, json.dumps(valeur)))
+                        'values (?, 1, ?, 0, 1)', (name, json.dumps(value)))
 
-    def annotation(self, piece: int, tags=(), cle: str | None = None) -> int:
-        iid, _ = self._element('annotation', cle)
+    def annotation(self, attachment: int, tags=(), key: str | None = None) -> int:
+        iid, _ = self._item('annotation', key)
         self.tags(iid, tags)
         self.db.execute('insert into itemAnnotations (itemID, parentItemID, type, sortIndex, position, isExternal) '
-                        "values (?, ?, 1, '0', '{}', 0)", (iid, piece))
+                        "values (?, ?, 1, '0', '{}', 0)", (iid, attachment))
         return iid
 
-    def note(self, parent: int | None = None, tags=(), cle: str | None = None) -> int:
-        iid, _ = self._element('note', cle)
+    def note(self, parent: int | None = None, tags=(), key: str | None = None) -> int:
+        iid, _ = self._item('note', key)
         self.tags(iid, tags)
         self.db.execute('insert into itemNotes (itemID, parentItemID, note) values (?, ?, ?)', (iid, parent, 'Note'))
         return iid
 
-    def corbeille(self, iid: int):
+    def trash(self, iid: int):
         self.db.execute('insert into deletedItems (itemID) values (?)', (iid,))
 
-    def synchroniser(self, version: int) -> None:
-        """Version de la bibliothèque reçue du serveur, comme après une synchronisation."""
+    def sync(self, version: int) -> None:
+        """Library version received from the server, as after a synchronisation."""
         self.db.execute('insert or replace into libraries (libraryID, type, editable, filesEditable, version) '
                         "values (1, 'user', 1, 1, ?)", (version,))
 
-    def compte(self, utilisateur: int | None, nom: str = 'durand') -> None:
-        """Compte zotero.org synchronisé par la base, comme Zotero le retient à la première synchronisation
-        (`settings`, `setting = 'account'`). None : base jamais synchronisée."""
+    def account(self, user: int | None, name: str = 'durand') -> None:
+        """zotero.org account synchronised by the database, as Zotero keeps it at the first synchronisation
+        (`settings`, `setting = 'account'`). None: database never synchronised."""
         self.db.execute("delete from settings where setting = 'account' and key in ('userID', 'username')")
-        if utilisateur is not None:
+        if user is not None:
             self.db.executemany("insert into settings values ('account', ?, ?)",
-                                [('userID', utilisateur), ('username', nom)])
+                                [('userID', user), ('username', name)])
 
-    def enregistrer(self) -> Path:
+    def save(self) -> Path:
         self.db.commit()
-        return self.base
+        return self.database
 
 
 @pytest.fixture(scope='session')
-def base_vide(tmp_path_factory) -> Path:
-    chemin = tmp_path_factory.mktemp('modele') / 'zotero.sqlite'
-    db = sqlite3.connect(chemin)
+def empty_database(tmp_path_factory) -> Path:
+    path = tmp_path_factory.mktemp('modele') / 'zotero.sqlite'
+    db = sqlite3.connect(path)
     db.executescript('begin;' + SCHEMA.read_text(encoding='utf-8') + 'commit;')
     db.close()
-    return chemin
+    return path
 
 
 @pytest.fixture
-def zotero(tmp_path, base_vide):
-    z = ZoteroFactice(tmp_path / 'Zotero', base_vide)
+def zotero(tmp_path, empty_database):
+    z = FakeZotero(tmp_path / 'Zotero', empty_database)
     yield z
     z.db.close()
 
 
 @pytest.fixture(autouse=True)
-def sans_profil_reel(monkeypatch):
-    """Aucun test ne lit le profil de Zotero de la machine. Better BibTeX est alors cherché dans le dossier de
-    données (repli de D145), sauf quand un test fournit ses propres profils."""
+def no_real_profile(monkeypatch):
+    """No test reads the machine's Zotero profile. Better BibTeX is then looked for in the data folder
+    (D145 fallback), except when a test provides its own profiles."""
     from zot_clean import bbt
-    monkeypatch.setattr(bbt, 'dossiers_profils', lambda: [])
+    monkeypatch.setattr(bbt, 'profile_folders', lambda: [])

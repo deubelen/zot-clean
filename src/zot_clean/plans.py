@@ -1,148 +1,185 @@
-"""Plans d'écriture (D34, D46).
+"""Write plans (D34, D46).
 
-Une étape de nettoyage ne touche jamais Zotero, elle produit un plan. Un plan
-est une liste de groupes, et chaque groupe une suite d'opérations sur des
-éléments (clé, valeurs d'avant et d'après des champs touchés, rang dans le
-groupe). Rattacher à une fiche, mettre à la corbeille ou en sortir sont des
-changements de champs comme les autres (`parentItem`, `deleted`). `zc
-appliquer` exécute le plan tel quel, et son empreinte relie le plan à ses
-journaux.
+A cleanup step never touches Zotero, it produces a plan. A plan is a list of
+groups, and each group a sequence of operations on elements (key, before and
+after values of the touched fields, rank in the group). Attaching to an item,
+moving to the trash or restoring from it are field changes like any other
+(`parentItem`, `deleted`). `zc apply` runs the plan as it is, and its
+fingerprint links the plan to its journals.
 
-Une opération porte sur une fiche (`genre = "items"`) ou sur une collection
-(`genre = "collections"`, D114), dont le nom, le parent et la corbeille se
-changent de la même façon (`name`, `parentCollection`, `deleted`). Une
-opération de création (`creation`) fait naître une collection sous la clé
-tirée par le plan, pour que les fiches du même plan puissent déjà y renvoyer.
+An operation targets an item (`kind = "items"`, stored as `genre`) or a
+collection (`kind = "collections"`, D114), whose name, parent and trash state
+change the same way (`name`, `parentCollection`, `deleted`). A creation
+operation (`create`, stored as `creation`) brings a collection into being
+under the key drawn by the plan, so that items of the same plan can already
+refer to it.
 
-L'empreinte porte sur tout ce qui agit à l'exécution ou dans le registre des
-journaux, à savoir les groupes et, pour un plan d'annulation, les journaux
-qu'il défait (format 2, D180). La description et la date de création n'y
-entrent pas, pour qu'un plan recalculé à l'identique garde son empreinte
-(D47). Un plan du format 1 garde l'empreinte calculée sans les journaux.
+The fingerprint covers everything that acts at execution or in the journal
+registry, namely the groups and, for an undo plan, the journals it undoes
+(format 2, D180). The description and the creation date are left out, so that
+a plan recomputed identically keeps its fingerprint (D47). A format 1 plan
+keeps the fingerprint computed without the journals.
+
+The keys of the file form a frozen protocol, independent of the Python names
+(D209). The `*_FIELDS` tables give, for each written key, the attribute that
+carries it. The file and the fingerprint are computed on this stored
+representation, so renaming an attribute changes neither.
 """
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from zot_clean.lang import L
+
 FORMAT = 2
-FORMATS = (1, 2)  # formats encore lus
+FORMATS = (1, 2)  # formats still read
 
-# Valeur d'un champ absent des données renvoyées par l'API.
-DEFAUTS = {'deleted': False, 'parentItem': False, 'parentCollection': False, 'collections': [], 'tags': [], 'relations': {}, 'creators': []}
+# Value of a field missing from the data returned by the API.
+DEFAULTS = {'deleted': False, 'parentItem': False, 'parentCollection': False, 'collections': [], 'tags': [], 'relations': {}, 'creators': []}
 
 
-def normaliser(champ: str, v):
-    """Forme comparable d'une valeur, indépendante de l'ordre que renvoie l'API."""
-    if champ == 'deleted':
+def normalize(field_name: str, v):
+    """Comparable form of a value, independent of the order the API returns."""
+    if field_name == 'deleted':
         return bool(v)
-    if champ in ('parentItem', 'parentCollection'):
+    if field_name in ('parentItem', 'parentCollection'):
         return v or False
-    if champ == 'collections':
+    if field_name == 'collections':
         return sorted(v or [])
-    if champ == 'tags':
+    if field_name == 'tags':
         return sorted([t['tag'], int(t.get('type', 0))] for t in v or [])
-    if champ == 'relations':
+    if field_name == 'relations':
         return {k: sorted([x] if isinstance(x, str) else x) for k, x in (v or {}).items() if x}
     return v
 
 
-def valeur(data: dict, champ: str):
-    return normaliser(champ, data.get(champ, DEFAUTS.get(champ, '')))
+def value(data: dict, field_name: str):
+    return normalize(field_name, data.get(field_name, DEFAULTS.get(field_name, '')))
 
 
-def brute(data: dict, champ: str):
-    """Valeur telle que l'API l'attend en écriture, défaut compris."""
-    return data.get(champ, DEFAUTS.get(champ, ''))
+def raw_value(data: dict, field_name: str):
+    """Value as the API expects it when writing, default included."""
+    return data.get(field_name, DEFAULTS.get(field_name, ''))
 
 
 @dataclass
 class Operation:
-    cle: str
-    avant: dict
-    apres: dict
-    rang: int = 0  # les rangs d'un groupe s'exécutent dans l'ordre, un rang en échec arrête le groupe
+    key: str
+    before: dict
+    after: dict
+    rank: int = 0  # the ranks of a group run in order, a failed rank stops the group
     nature: str = ''
-    genre: str = 'items'  # ou 'collections', ou 'settings' (réglage synchronisé, `value`, D175)
-    creation: bool = False  # collection à créer sous la clé `cle`, avec les champs de `apres`
-    # Mise à la corbeille : enfants (pièces jointes, notes, annotations) d'une fiche, ou fiches et sous-collections
-    # d'une collection, connus au plan. Un autre trouvé au moment d'écrire arrête le groupe (D182, D183).
-    enfants: list[str] | None = None
-    exige: dict | None = None  # champs qui doivent encore avoir ces valeurs, même dans un plan partiel (D183)
+    kind: str = 'items'  # or 'collections', or 'settings' (synced setting, `value`, D175)
+    create: bool = False  # collection to create under the key `key`, with the fields of `after`
+    # Moving to the trash: children (attachments, notes, annotations) of an item, or items and subcollections
+    # of a collection, known to the plan. Another one found at write time stops the group (D182, D183).
+    children: list[str] | None = None
+    requires: dict | None = None  # fields that must still have these values, even in a partial plan (D183)
 
 
 @dataclass
-class Groupe:
+class Group:
     id: str
-    titre: str
+    title: str
     operations: list[Operation]
 
 
 @dataclass
 class Plan:
-    etape: str
-    bibliotheque: int
-    groupes: list[Groupe]
+    step: str
+    library: int
+    groups: list[Group]
     description: str = ''
-    # Annulation (D39) : un champ en conflit est laissé tel quel, les autres sont écrits.
-    partiel: bool = False
-    annule: list[str] = field(default_factory=list)
-    cree: str = ''
+    # Undo (D39): a conflicting field is left as it is, the others are written.
+    partial: bool = False
+    undoes: list[str] = field(default_factory=list)
+    created: str = ''
     format: int = FORMAT
 
     @property
-    def empreinte(self) -> str:
-        contenu = {'etape': self.etape, 'bibliotheque': self.bibliotheque, 'partiel': self.partiel,
-                   'groupes': [_sans_defauts(asdict(g)) for g in self.groupes]}
-        if self.annule and self.format >= 2:  # absent sinon, pour que l'empreinte des autres plans ne change pas
-            contenu['annule'] = self.annule
-        return hashlib.sha256(json.dumps(contenu, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:12]
+    def fingerprint(self) -> str:
+        content = {'etape': self.step, 'bibliotheque': self.library, 'partiel': self.partial,
+                   'groupes': [_without_defaults(_stored_group(g)) for g in self.groups]}
+        if self.undoes and self.format >= 2:  # absent otherwise, so that the fingerprint of other plans does not change
+            content['annule'] = self.undoes
+        return hashlib.sha256(json.dumps(content, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:12]
 
     @property
-    def nb_operations(self) -> int:
-        return sum(len(g.operations) for g in self.groupes)
+    def n_operations(self) -> int:
+        return sum(len(g.operations) for g in self.groups)
 
 
-def _sans_defauts(groupe: dict) -> dict:
-    """Groupe sans les champs d'opération ajoutés pour les collections quand ils ont leur valeur par défaut,
-    pour que l'empreinte des plans écrits avant eux ne change pas."""
+# File key -> attribute, in writing order (D209). Groups and operations are written in their place.
+PLAN_FIELDS = {'etape': 'step', 'bibliotheque': 'library', 'groupes': 'groups', 'description': 'description',
+               'partiel': 'partial', 'annule': 'undoes', 'cree': 'created'}
+GROUP_FIELDS = {'id': 'id', 'titre': 'title', 'operations': 'operations'}
+OPERATION_FIELDS = {'cle': 'key', 'avant': 'before', 'apres': 'after', 'rang': 'rank', 'nature': 'nature',
+                    'genre': 'kind', 'creation': 'create', 'enfants': 'children', 'exige': 'requires'}
+
+
+def _stored_operation(op: Operation) -> dict:
+    return {key: getattr(op, attribute) for key, attribute in OPERATION_FIELDS.items()}
+
+
+def _stored_group(g: Group) -> dict:
+    return {key: [_stored_operation(o) for o in g.operations] if key == 'operations' else getattr(g, attribute)
+            for key, attribute in GROUP_FIELDS.items()}
+
+
+def to_stored(plan: Plan) -> dict:
+    """The plan as it is written in its file."""
+    d = {key: [_stored_group(g) for g in plan.groups] if key == 'groupes' else getattr(plan, attribute)
+         for key, attribute in PLAN_FIELDS.items()}
+    return {'format': plan.format, 'empreinte': plan.fingerprint, **d}
+
+
+def _without_defaults(group: dict) -> dict:
+    """Group without the operation fields added for collections when they have their default value,
+    so that the fingerprint of plans written before them does not change."""
     ops = [{k: v for k, v in o.items() if not (k == 'genre' and v == 'items' or k == 'creation' and not v
                                                 or k in ('enfants', 'exige') and v is None)}
-           for o in groupe['operations']]
-    return dict(groupe, operations=ops)
+           for o in group['operations']]
+    return dict(group, operations=ops)
 
 
-def ecrire(plan: Plan, dossier: Path, rapport: str) -> Path:
-    """Écrit le plan et son rapport lisible dans `dossier` (plans/ du dossier de travail)."""
-    dossier.mkdir(parents=True, exist_ok=True)
-    plan.cree = plan.cree or datetime.now().astimezone().isoformat(timespec='seconds')
-    chemin = dossier / f'{datetime.now():%Y-%m-%d_%H%M%S}_{plan.etape}_{plan.empreinte}.json'
-    d = asdict(plan)
-    d = {'format': d.pop('format'), 'empreinte': plan.empreinte, **d}
-    chemin.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding='utf-8')
-    chemin.with_suffix('.md').write_text(rapport, encoding='utf-8')
-    return chemin
+def write(plan: Plan, folder: Path, report: str) -> Path:
+    """Write the plan and its readable report in `folder` (plans/ of the working folder)."""
+    folder.mkdir(parents=True, exist_ok=True)
+    plan.created = plan.created or datetime.now().astimezone().isoformat(timespec='seconds')
+    path = folder / f'{datetime.now():%Y-%m-%d_%H%M%S}_{plan.step}_{plan.fingerprint}.json'
+    path.write_text(json.dumps(to_stored(plan), ensure_ascii=False, indent=1), encoding='utf-8')
+    path.with_suffix('.md').write_text(report, encoding='utf-8')
+    return path
 
 
-def charger(chemin: Path) -> Plan:
-    d = json.loads(chemin.read_text(encoding='utf-8'))
+def load(path: Path) -> Plan:
+    d = json.loads(path.read_text(encoding='utf-8'))
     if d.get('format') not in FORMATS:
-        raise SystemExit(f'{chemin} : format de plan inconnu ({d.get("format")}). Mettre zot-clean à jour.')
-    groupes = [Groupe(g['id'], g['titre'], [Operation(**o) for o in g['operations']]) for g in d['groupes']]
-    plan = Plan(d['etape'], d['bibliotheque'], groupes, d.get('description', ''), d.get('partiel', False),
-                d.get('annule', []), d.get('cree', ''), d['format'])
-    if plan.empreinte != d.get('empreinte'):
-        raise SystemExit(f'{chemin} : le plan a été modifié depuis sa création. Le régénérer.')
+        raise SystemExit(L(en=f'{path}: unknown plan format ({d.get("format")}). Update zot-clean.',
+                           fr=f'{path} : format de plan inconnu ({d.get("format")}). Mettre zot-clean à jour.'))
+    groups = [Group(**{GROUP_FIELDS[k]: [_operation(o) for o in v] if k == 'operations' else v
+                         for k, v in g.items()}) for g in d['groupes']]
+    plan = Plan(**{PLAN_FIELDS[k]: groups if k == 'groupes' else v for k, v in d.items() if k in PLAN_FIELDS},
+                format=d['format'])
+    if plan.fingerprint != d.get('empreinte'):
+        raise SystemExit(L(en=f'{path}: the plan was modified after it was created. Regenerate it.',
+                           fr=f'{path} : le plan a été modifié depuis sa création. Le régénérer.'))
     return plan
 
 
-def plus_recents(chemin: Path, plan: Plan) -> list[Path]:
-    """Plans de la même étape préparés après `chemin`, dans le même dossier. Un plan regénéré ne remplace pas le
-    fichier de l'ancien, qui reste à côté : `zc appliquer` le signale. Les plans d'annulation ne sont pas comparés."""
-    if plan.etape == 'annulation':
+def _operation(o: dict) -> Operation:
+    """Operation read from a file, where keys introduced since format 1 may be missing."""
+    return Operation(**{OPERATION_FIELDS[k]: v for k, v in o.items()})
+
+
+def newer_plans(path: Path, plan: Plan) -> list[Path]:
+    """Plans of the same step prepared after `path`, in the same folder. A regenerated plan does not replace the
+    file of the old one, which stays beside it: `zc apply` flags it. Undo plans are not compared."""
+    if plan.step == 'annulation':
         return []
-    horodatage = chemin.name[:17]  # AAAA-MM-JJ_HHMMSS
-    return sorted(p for p in chemin.parent.glob(f'*_{plan.etape}_*.json')
-                  if p.name[:17] > horodatage and p.name.split('_')[2] == plan.etape)
+    timestamp = path.name[:17]  # YYYY-MM-DD_HHMMSS
+    return sorted(p for p in path.parent.glob(f'*_{plan.step}_*.json')
+                  if p.name[:17] > timestamp and p.name.split('_')[2] == plan.step)

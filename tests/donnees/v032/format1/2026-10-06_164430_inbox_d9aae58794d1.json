@@ -1,0 +1,100 @@
+{
+ "format": 1,
+ "empreinte": "aba2e271b0e5",
+ "etape": "inbox",
+ "bibliotheque": 4242,
+ "groupes": [
+  {
+   "id": "fusion-1",
+   "titre": "Museum displays and their publics",
+   "operations": [
+    {
+     "cle": "2222UUBB",
+     "avant": {
+      "relations": {}
+     },
+     "apres": {
+      "relations": {
+       "dc:replaces": [
+        "http://zotero.org/users/4242/items/2222UUBD"
+       ]
+      }
+     },
+     "rang": 1,
+     "nature": "compléter la fiche conservée"
+    },
+    {
+     "cle": "2222UUBD",
+     "avant": {
+      "deleted": false
+     },
+     "apres": {
+      "deleted": true
+     },
+     "rang": 2,
+     "nature": "fiche absorbée à la corbeille"
+    }
+   ]
+  },
+  {
+   "id": "2222UUBC",
+   "titre": "Perceptual learning revisited",
+   "operations": [
+    {
+     "cle": "2222UUBC",
+     "avant": {
+      "volume": "",
+      "publicationTitle": ""
+     },
+     "apres": {
+      "volume": "12",
+      "publicationTitle": "Cognition"
+     },
+     "rang": 1,
+     "nature": "complété depuis crossref"
+    },
+    {
+     "cle": "2222UUBC",
+     "avant": {
+      "collections": [
+       "2222UUB3"
+      ]
+     },
+     "apres": {
+      "collections": [
+       "2222UUB7"
+      ]
+     },
+     "rang": 2,
+     "nature": "rangement"
+    }
+   ]
+  },
+  {
+   "id": "2222UUBE",
+   "titre": "Teaching perception to first-year students",
+   "operations": [
+    {
+     "cle": "2222UUBE",
+     "avant": {
+      "collections": [
+       "2222UUB9"
+      ]
+     },
+     "apres": {
+      "collections": [
+       "2222UUB9",
+       "2222UUB8"
+      ]
+     },
+     "rang": 2,
+     "nature": "rangement"
+    }
+   ]
+  }
+ ],
+ "description": "Tri de l'Inbox, 3 groupes.",
+ "partiel": false,
+ "annule": [],
+ "cree": "2026-10-06T16:44:30+02:00"
+}

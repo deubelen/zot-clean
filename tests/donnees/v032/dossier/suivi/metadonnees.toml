@@ -1,0 +1,42 @@
+# Cas de métadonnées à juger, écrits par `zc metadonnees identifiants` et `zc metadonnees completer`.
+# Ce fichier se relit et se modifie à la main ou avec l'agent. Les commandes le mettent à jour sans perdre
+# les décisions, et le plan suivant de la même sous-étape reprend les cas acceptés. Les décisions s'écrivent
+# aussi par `zc metadonnees accepter` (tous les évidents avec --evidents, ou des clés) et `zc metadonnees refuser`.
+#
+# decision : "accepter" (la proposition numéro `choix`, 1 pour la première), "refuser" (à ne plus proposer)
+#            ou "" (à juger).
+# forcer   : valeurs imposées à la fiche en plus de la proposition, par exemple { "date" = "1998" }.
+# classe   : tri fait par zc. « évident » quand une seule proposition concorde en tout avec la fiche, son
+#            numéro étant alors dans `choix`, ou quand un DOI introuvable n'a pas d'autre piste que son
+#            retrait ; « douteux » sinon. L'avis de chaque proposition dit ce qui concorde ou diffère
+#            (titre, auteur, année, type, revue ou ouvrage, éditeur…).
+#
+# Pour imposer une valeur hors de tout cas (revue fausse, ISBN d'un autre livre…), ajouter à la fin du
+# fichier un cas complet comme celui-ci, avec la clé de la fiche, puis relancer `zc metadonnees completer`.
+# Une valeur vide vide le champ, par exemple forcer = { "ISBN" = "" } pour un livre.
+#
+#   [[cas]]
+#   cle = "ABCD1234"
+#   sous_etape = "completer"
+#   probleme = "forcer"
+#   decision = "accepter"
+#   forcer = { "publicationTitle" = "Journal of Experimental Psychology: General" }
+
+[[cas]]
+# 2222UUB4 · Martin · 1991 · Situated learning in communities of practice (Article de revue, DOI 10.1111/inexistant)
+cle = "2222UUB4"
+sous_etape = "identifiants"
+probleme = "doi_inconnu"
+decision = "refuser"
+choix = 1
+forcer = {  }
+classe = "douteux"
+[[cas.propositions]]  # 1
+champs = { "DOI" = "" }
+source = ""
+note = "retirer le DOI, que ni doi.org ni les sources ne connaissent"
+[[cas.propositions]]  # 2
+champs = { "DOI" = "10.1111/situe" }
+source = "crossref"
+note = "crossref : « Situated learning in communities of practice », Martin, 2001, Article de revue (similarité 1.00)"
+avis = "année"

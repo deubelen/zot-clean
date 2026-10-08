@@ -1,29 +1,29 @@
-"""Tags, étape 6 du nettoyage (D22, D151 à D156).
+"""Tags, step 6 of the cleanup (D22, D151 to D156).
 
-`inventaire` décrit tout le jeu de tags (usages, variantes, mots-clés importés,
-états venus d'autres habitudes, concepts et tags qui doublent un thème, tags
-protégés) et prépare `suivi/tags.toml`, qui décrit des règles par nom de tag,
-jamais par fiche. La section `[automatiques]` porte la règle globale qui retire
-les tags automatiques (D152), `[importes]` la même règle pour les mots-clés
-importés en tags manuels (D153), chaque `[[tag]]` le sort d'un tag (exception à
-la règle, état, concept, suppression, fusion) et chaque `[[variantes]]` un
-groupe de noms ramenés à une forme. Les décisions sont gardées d'une fois sur
-l'autre, et le fichier sert ensuite au tri de l'Inbox (D155).
+`inventory` describes the whole set of tags (usages, variants, imported
+keywords, statuses from other habits, concepts and tags that duplicate a
+theme, protected tags) and prepares `suivi/tags.toml`, which describes rules
+by tag name, never by item. The `[automatiques]` section holds the global
+rule that removes automatic tags (D152), `[importes]` the same rule for
+keywords imported as manual tags (D153), each `[[tag]]` the fate of one tag
+(exception to the rule, status, concept, deletion, merge) and each
+`[[variantes]]` a group of names brought back to one form. Decisions are kept
+from one run to the next, and the file then serves the Inbox triage (D155).
 
-`regles` et `tags_vises` donnent, sans réseau, la liste finale des tags d'un
-élément d'après les règles acceptées. `planifier` en tire un plan d'une
-opération par élément (fiche, pièce jointe, note ou annotation) qui écrit sa
-liste complète de tags, types gardés (D156), sans `DELETE /tags`. Il compare
-l'état réel aux règles et ne planifie que la différence (D119).
+`rules` and `targeted_tags` give, without network, the final list of tags of
+an element according to the accepted rules. `make_plan` derives from them a
+plan with one operation per element (item, attachment, note or annotation)
+that writes its complete list of tags, types kept (D156), without
+`DELETE /tags`. It compares the real state with the rules and plans only the
+difference (D119).
 
-Sont protégés, c'est-à-dire inventoriés sans proposition et changés seulement
-par une entrée de l'utilisateur (`source = "utilisateur"`), les tags
-techniques, les états et marques de la méthode, les tags colorés, ceux de
-`[tags] proteges` et ceux sur lesquels repose une proposition de rangement en
-attente. Les tags de `tags_exclus` ne changent jamais. Un tag porté seulement
-par des fiches confidentielles n'apparaît que sous un identifiant stable, et
-seules les règles globales s'y appliquent sans entrée de l'utilisateur. Un tag
-cité par une recherche enregistrée échappe aux règles globales.
+Protected tags, that is inventoried without proposal and changed only by a
+user entry (`source = "utilisateur"`), are the technical tags, the statuses
+and marks of the method, the colored tags, those of `[tags] proteges` and
+those on which a pending filing proposal rests. The tags of `tags_exclus`
+never change. A tag carried only by confidential items appears only under a
+stable identifier, and only the global rules apply to it without a user
+entry. A tag cited by a saved search escapes the global rules.
 """
 
 import hashlib
@@ -35,56 +35,127 @@ from dataclasses import dataclass, field
 from datetime import date
 from difflib import SequenceMatcher
 
-from zot_clean import filtre, fonds as f, rangement as r
-from zot_clean.audit import annee, ecrire_toml, norm, pluriel
+from zot_clean import privacy, subjects as f, filing as r
+from zot_clean.audit import year, write_toml, norm
 from zot_clean.config import Config
-from zot_clean.doublons import _toml
-from zot_clean.ecriture import Client
-from zot_clean.lecture import Bibliotheque, Element
-from zot_clean.plans import Groupe, Operation, Plan, normaliser
+from zot_clean.duplicates import _toml
+from zot_clean.lang import L, plural
+from zot_clean import lang
+from zot_clean.api import Client
+from zot_clean.reader import Library, Item
+from zot_clean.plans import Group, Operation, Plan, normalize
 
-FICHIER = 'tags.toml'
-ETAPE = 'tags'
-SUPPRIMER, GARDER, CONCEPT, ETAT, FUSIONNER = 'supprimer', 'garder', 'concept', 'état', 'fusionner'
-SORTS = {norm(s): s for s in (SUPPRIMER, GARDER, CONCEPT, ETAT, FUSIONNER)}
-ACCEPTER, REFUSER = 'accepter', 'refuser'
-ZC, AGENT, UTILISATEUR = 'zc', 'agent', 'utilisateur'
-EVIDENT, DOUTEUX = 'évident', 'douteux'
-MANUEL, AUTOMATIQUE, LES_DEUX = 'manuel', 'automatique', 'les deux'
-MAX_COULEURS = 9
-TITRES = 3
-VOIR_MAX = 50
+FILE = 'tags.toml'
+STEP = 'tags'
+DELETE, KEEP, CONCEPT, STATUS, MERGE = 'supprimer', 'garder', 'concept', 'état', 'fusionner'
+ACTIONS = {norm(s): s for s in (DELETE, KEEP, CONCEPT, STATUS, MERGE)}
+ACCEPT, REJECT = 'accepter', 'refuser'
+ZC, AGENT, USER = 'zc', 'agent', 'utilisateur'
+OBVIOUS, DOUBTFUL = 'évident', 'douteux'
+MANUAL, AUTOMATIC, BOTH = 'manuel', 'automatique', 'les deux'
+MAX_COLORS = 9
+TITLES = 3
+SHOW_MAX = 50
 
-# Sortes de changement d'un plan, dans l'ordre du rapport.
-SORTES = {
-    'automatique': 'tags automatiques retirés par la règle globale',
-    'importé': 'mots-clés importés retirés',
-    'variante': 'variantes ramenées à leur forme',
-    'état': 'tags ramenés à un état ou une marque de la méthode',
-    'concept': 'tags convertis en concepts',
-    'fusion': 'tags fusionnés dans un autre',
-    'suppression': 'tags supprimés',
-}
-SORTE_DU_SORT = {CONCEPT: 'concept', ETAT: 'état', FUSIONNER: 'fusion'}
+# Kinds of change in a plan, in report order (the keys are stored in the `nature` of the operations).
+def kinds() -> dict[str, str]:
+    return {
+        'automatique': L(en='automatic tags removed by the global rule', fr='tags automatiques retirés par la règle globale'),
+        'importé': L(en='imported keywords removed', fr='mots-clés importés retirés'),
+        'variante': L(en='variants brought back to their form', fr='variantes ramenées à leur forme'),
+        'état': L(en='tags brought back to a status or mark of the method',
+                  fr='tags ramenés à un état ou une marque de la méthode'),
+        'concept': L(en='tags converted into concepts', fr='tags convertis en concepts'),
+        'fusion': L(en='tags merged into another', fr='tags fusionnés dans un autre'),
+        'suppression': L(en='tags deleted', fr='tags supprimés'),
+    }
 
-# États et marques venus d'autres habitudes (D156), rapprochés par leur forme de ceux de `[methode]` : numéro de
-# l'état dans `etats` (0 à lire, 1 en cours, 2 lu) ou de la marque dans `autres_tags` (0 essentiel, 1 papier).
-ETATS_ETRANGERS = {
+
+def kind_word(kind: str) -> str:
+    """Kind of change in one word, as shown beside a tag or an element."""
+    return {'automatique': L(en='automatic', fr='automatique'), 'importé': L(en='imported', fr='importé'),
+            'variante': L(en='variant', fr='variante'), 'état': L(en='status', fr='état'),
+            'concept': L(en='concept', fr='concept'), 'fusion': L(en='merge', fr='fusion'),
+            'suppression': L(en='deletion', fr='suppression')}.get(kind, kind)
+
+
+def nature_shown(nature: str) -> str:
+    """Nature of an operation of the plan (stored kinds, D209) as shown."""
+    return ', '.join(kind_word(k) for k in nature.split(', ')) if nature else nature
+
+
+def type_shown(kind: str) -> str:
+    """Type of a tag (stored words, D209: « manuel », « automatique », « les deux », with « , importé ») as shown
+    (verification pilot: an English report read « (manuel, 3 item(s)) »)."""
+    words = {MANUAL: L(en='manual', fr='manuel'), AUTOMATIC: L(en='automatic', fr='automatique'),
+             BOTH: L(en='both', fr='les deux'), 'importé': L(en='imported', fr='importé')}
+    return ', '.join(words.get(w, w) for w in kind.split(', ')) if kind else kind
+
+
+def action_shown(action: str) -> str:
+    """Fate of a tag (stored word, D209) as shown, with the English values of `--action` (D219)."""
+    return {DELETE: L(en='delete', fr='supprimer'), KEEP: L(en='keep', fr='garder'),
+            CONCEPT: L(en='concept', fr='concept'), STATUS: L(en='status', fr='état'),
+            MERGE: L(en='merge', fr='fusionner')}.get(action, action)
+
+
+def grade_shown(grade: str) -> str:
+    """Grade of a group of variants (stored word, D209) as shown."""
+    return {OBVIOUS: L(en='obvious', fr='évident'), DOUBTFUL: L(en='doubtful', fr='douteux')}.get(grade, grade)
+
+
+KIND_OF_ACTION = {CONCEPT: 'concept', STATUS: 'état', MERGE: 'fusion'}
+
+# Statuses and marks from other habits (D156), matched by form to those of `[methode]`: index of the
+# status in `etats` (0 to read, 1 in progress, 2 read) or of the mark in `autres_tags` (0 essential, 1 paper).
+FOREIGN_STATUSES = {
     0: ('to read', 'toread', 'unread', 'à lire', 'non lu', 'pas lu', 'read later', 'à lire plus tard', 'reading list'),
-    1: ('reading', 'en cours', 'en cours de lecture', 'en lecture', 'in progress', 'currently reading', 'commencé'),
+    1: ('reading', 'en cours', 'en cours de lecture', 'en lecture', 'in progress', 'currently reading', 'commencé',
+        'reading now', 'now reading', 'started'),
     2: ('read', 'lu', 'déjà lu', 'already read', 'done', 'finished', 'fini', 'terminé', 'lu et annoté'),
 }
-MARQUES_ETRANGERES = {
+FOREIGN_MARKS = {
     0: ('important', 'essentiel', 'essential', 'key paper', 'favorite', 'favourite', 'favori', 'must read',
         'incontournable', 'starred', 'étoile'),
-    1: ('imprimé', 'printed', 'papier', 'version papier', 'hard copy', 'photocopie', 'copie papier'),
+    1: ('imprimé', 'printed', 'papier', 'version papier', 'hard copy', 'photocopie', 'copie papier', 'printed copy',
+        'print copy', 'copie imprimée', 'paper copy'),
 }
 
-EN_TETE = """\
-# Règles des tags, préparées par `zc tags inventaire` (étape 6) et lues par `zc tags planifier`, puis par
-# le tri de l'Inbox. Ce fichier se relit et se modifie à la main ou avec l'agent. `zc tags inventaire` le met à jour
+def header() -> str:
+    return L(en="""\
+# Tag rules, prepared by `zc tags inventory` (step 6) and read by `zc tags plan`, then by the Inbox triage.
+# This file can be read and edited by hand or with the agent. `zc tags inventory` updates it without losing the
+# decisions taken. A rule applies to a tag name, never to an item. Decisions are written with `zc tags accept`,
+# `zc tags reject` and `zc tags add` (see `zc tags accept --help`).
+#
+# [automatiques] removes all the automatic tags (publishers' keywords), except the exceptions below.
+# [importes]     likewise removes the keywords imported as manual tags (items that carry many of them, and rare ones).
+#
+# [[tag]], a tag to judge.
+#   sort     : "supprimer" (delete), "garder" (keep), "concept" (renamed to `cible`, which starts with the concept
+#              prefix), "état" (renamed to a status or a mark of the method), "fusionner" (renamed to `cible`).
+#              A kept automatic tag stays automatic. A renamed tag becomes manual.
+#   source   : "zc" (proposed by zc), "agent", "utilisateur". A protected tag (technical, status, mark, colored, list
+#              [tags] proteges of config.toml) only changes through an entry whose source is "utilisateur".
+#   classe   : "évident" (to approve in bulk) or "douteux" (by bundles).
+#   decision : "" (proposed), "accepter" or "refuser". Only accepted entries apply. As long as an entry waits, its
+#              tag escapes the global rules.
+#   effectif (items that carry it, directly or through a child), dispersion (themes of the subjects where they are),
+#   themes, theme (theme it duplicates), recherches (saved searches that cite it): filled in by zc.
+#   variantes : other names of the same form, brought back to `nom` before the fate is applied (for instance deleted
+#              with it). zc gathers them here rather than in a [[variantes]] when it proposes to delete the tag.
+#
+# [[variantes]], names that differ only by case, accents, spaces, prefix or plural, brought back to `cible`, set as a
+#   manual tag. "évident" when the plural is not involved. A concept is written in lowercase except for proper
+#   nouns, in the user's language, spaces allowed ("#cognition incarnée").
+#
+# A tag carried only by confidential items appears under an identifier ("tag confidentiel 1a2b3c4d"), usable as a
+# name in an entry whose source is "utilisateur".
+""", fr="""\
+# Règles des tags, préparées par `zc tags inventory` (étape 6) et lues par `zc tags plan`, puis par
+# le tri de l'Inbox. Ce fichier se relit et se modifie à la main ou avec l'agent. `zc tags inventory` le met à jour
 # sans perdre les décisions prises. Une règle porte sur un nom de tag, jamais sur une fiche. Les décisions
-# s'écrivent avec `zc tags accepter`, `zc tags refuser` et `zc tags ajouter` (voir `zc tags accepter --help`).
+# s'écrivent avec `zc tags accept`, `zc tags reject` et `zc tags add` (voir `zc tags accept --help`).
 #
 # [automatiques] retire tous les tags automatiques (mots-clés des éditeurs), sauf les exceptions ci-dessous.
 # [importes]     retire de même les mots-clés importés en tags manuels (fiches qui en portent beaucoup, et rares).
@@ -109,1237 +180,1430 @@ EN_TETE = """\
 #
 # Un tag porté seulement par des fiches confidentielles apparaît sous un identifiant (« tag confidentiel 1a2b3c4d »),
 # utilisable comme nom dans une entrée de source "utilisateur".
-"""
+""")
+
 
 
 # --- Formes -----------------------------------------------------------------------
 
-def _mots(nom: str, cfg: Config) -> tuple[str, list[str]]:
-    m = cfg.methode
-    tete = ''
-    if m.prefixe_technique and nom.startswith(m.prefixe_technique):
-        tete = m.prefixe_technique  # « _lu » n'est pas une variante de « lu »
-    if m.prefixe_concept and nom.startswith(m.prefixe_concept):
-        nom = nom[len(m.prefixe_concept):]
-    sans = ''.join(c for c in unicodedata.normalize('NFKD', nom) if not unicodedata.combining(c)).casefold()
-    return tete, re.findall(r'[^\W_]+', sans)
+def _words(name: str, cfg: Config) -> tuple[str, list[str]]:
+    m = cfg.method
+    head = ''
+    if m.technical_prefix and name.startswith(m.technical_prefix):
+        head = m.technical_prefix  # « _lu » is not a variant of « lu »
+    if m.concept_prefix and name.startswith(m.concept_prefix):
+        name = name[len(m.concept_prefix):]
+    without = ''.join(c for c in unicodedata.normalize('NFKD', name) if not unicodedata.combining(c)).casefold()
+    return head, re.findall(r'[^\W_]+', without)
 
 
-def forme_faible(nom: str, cfg: Config) -> str:
-    """Nom sans casse, accents, espaces, tirets ni préfixe des concepts."""
-    tete, mots = _mots(nom, cfg)
-    return tete + ''.join(mots) if mots else nom.casefold()
+def weak_form(name: str, cfg: Config) -> str:
+    """Name without case, accents, spaces, hyphens or concept prefix."""
+    head, words = _words(name, cfg)
+    return head + ''.join(words) if words else name.casefold()
 
 
-def forme(nom: str, cfg: Config) -> str:
-    """Forme normalisée qui regroupe les variantes (D156), pluriel simple compris (`s`, `x`, `-aux`)."""
-    tete, mots = _mots(nom, cfg)
-    return tete + ''.join(_singulier(x) for x in mots) if mots else nom.casefold()
+def form(name: str, cfg: Config) -> str:
+    """Normalised form that groups variants (D156), simple plural included (`s`, `x`, `-aux`)."""
+    head, words = _words(name, cfg)
+    return head + ''.join(_singular(x) for x in words) if words else name.casefold()
 
 
-def _singulier(mot: str) -> str:
-    if len(mot) > 3 and mot[-1] in 'sx':
-        mot = mot[:-1]
-    if len(mot) > 3 and mot.endswith('al'):
-        mot = mot[:-2] + 'au'  # cheval et chevaux, réseau et réseaux
-    return mot
+def _singular(word: str) -> str:
+    if len(word) > 3 and word[-1] in 'sx':
+        word = word[:-1]
+    if len(word) > 3 and word.endswith('al'):
+        word = word[:-2] + 'au'  # cheval and chevaux, réseau and réseaux
+    return word
 
 
-def _marque_technique(nom: str, cfg: Config) -> bool:
-    """Nom qui ne commence ni par une lettre, ni par un chiffre, ni par le préfixe des concepts : marque laissée par
-    une application (« /unread », « _tablet », « @todo »), jamais une notion à proposer comme concept. Les tags
-    techniques de la méthode (`_`) sont protégés avant d'arriver ici."""
-    p = cfg.methode.prefixe_concept
-    return bool(nom) and not nom[0].isalnum() and not (p and nom.startswith(p))
+def _technical_mark(name: str, cfg: Config) -> bool:
+    """Name that starts with neither a letter, nor a digit, nor the concept prefix: a mark left by
+    an application (« /unread », « _tablet », « @todo »), never a notion to propose as a concept. The technical
+    tags of the method (`_`) are protected before getting here."""
+    p = cfg.method.concept_prefix
+    return bool(name) and not name[0].isalnum() and not (p and name.startswith(p))
 
 
-def nom_de_concept(nom: str, cfg: Config) -> str:
-    """Nom de concept proposé pour un tag, suivant la convention du skill autant que zc le peut : préfixe des
-    concepts, minuscules (un sigle comme « TDAH » reste en capitales), espaces à la place des soulignés. zc ne
-    traduit rien, l'agent vérifie le nom et le met dans la langue de l'utilisateur."""
-    p = cfg.methode.prefixe_concept
-    corps = nom[len(p):] if p and nom.startswith(p) else nom
-    mots = corps.replace('_', ' ').split()
-    return p + ' '.join(m if len(m) > 1 and m.isupper() else m.lower() for m in mots)
+def concept_name(name: str, cfg: Config) -> str:
+    """Concept name proposed for a tag, following the skill's convention as far as zc can: concept
+    prefix, lowercase (an acronym like « TDAH » stays in capitals), spaces in place of underscores. zc does not
+    translate anything, the agent checks the name and puts it in the user's language."""
+    p = cfg.method.concept_prefix
+    body = name[len(p):] if p and name.startswith(p) else name
+    words = body.replace('_', ' ').split()
+    return p + ' '.join(m if len(m) > 1 and m.isupper() else m.lower() for m in words)
 
 
-def identifiant(nom: str) -> str:
-    """Nom stable d'un tag porté seulement par des fiches confidentielles (D156)."""
-    return 'tag confidentiel ' + hashlib.sha256(nom.encode('utf-8')).hexdigest()[:8]
+def identifier(name: str) -> str:
+    """Stable name of a tag carried only by confidential items (D156)."""
+    return 'tag confidentiel ' + hashlib.sha256(name.encode('utf-8')).hexdigest()[:8]
 
 
 # --- Usages -----------------------------------------------------------------------
 
 @dataclass
 class Usage:
-    nom: str
+    name: str
     types: set[int] = field(default_factory=set)
-    occurrences: Counter = field(default_factory=Counter)  # type -> nombre d'éléments
-    elements: set[int] = field(default_factory=set)
-    fiches: set[int] = field(default_factory=set)  # fiches qui le portent, directement ou par un enfant
-    enfants: int = 0
+    occurrences: Counter = field(default_factory=Counter)  # type -> number of elements
+    all_items: set[int] = field(default_factory=set)
+    items: set[int] = field(default_factory=set)  # items that carry it, directly or through a child
+    children: int = 0
     annotations: int = 0
-    themes: Counter = field(default_factory=Counter)  # thème du fonds -> fiches
-    recherches: list[str] = field(default_factory=list)
-    couleur: str = ''
-    rang_couleur: int = 0
-    confidentiel: bool = False
+    themes: Counter = field(default_factory=Counter)  # theme of the fonds -> items
+    searches: list[str] = field(default_factory=list)
+    color: str = ''
+    color_rank: int = 0
+    confidential: bool = False
 
     @property
     def dispersion(self) -> int:
         return len(self.themes)
 
     @property
-    def type_lisible(self) -> str:
-        return LES_DEUX if len(self.types) > 1 else (AUTOMATIQUE if 1 in self.types else MANUEL)
+    def readable_type(self) -> str:
+        return BOTH if len(self.types) > 1 else (AUTOMATIC if 1 in self.types else MANUAL)
 
 
-def fiche_de(b: Bibliotheque, el: Element) -> int | None:
-    """Fiche d'un élément, lui-même s'il en est une, sa fiche parente pour un enfant, None pour une note isolée."""
-    if el.est_fiche:
+def item_of(b: Library, el: Item) -> int | None:
+    """Item of an element, the element itself if it is one, its parent item for a child, None for a standalone note."""
+    if el.is_item:
         return el.id
-    if el.id in b.pieces:
-        return b.pieces[el.id].parent
+    if el.id in b.attachments:
+        return b.attachments[el.id].parent
     if el.id in b.notes:
         return b.notes[el.id]
-    piece = b.annotation_de.get(el.id)
-    return b.pieces[piece].parent if piece in b.pieces else None
+    attachment = b.annotation_of.get(el.id)
+    return b.attachments[attachment].parent if attachment in b.attachments else None
 
 
-def themes_des_fiches(b: Bibliotheque, cfg: Config) -> dict[int, set[str]]:
-    """Thèmes du fonds de chaque fiche, au niveau de la discipline et du thème (un sous-thème compte pour son thème),
-    hors collections exclues par le filtre."""
-    e = r._Etat(b)
-    racine = e.racine(cfg.methode.fonds) if cfg.methode.fonds else None
-    if racine is None:
+def themes_of_items(b: Library, cfg: Config) -> dict[int, set[str]]:
+    """Themes of the fonds for each item, at the level of discipline and theme (a subtheme counts for its theme),
+    outside the collections excluded by the filter."""
+    e = r._State(b)
+    root = e.root(cfg.method.subjects) if cfg.method.subjects else None
+    if root is None:
         return {}
-    _, couvertes = f.collections_exclues(b, cfg)
+    _, covered = f.excluded_collections(b, cfg)
     res: dict[int, set[str]] = defaultdict(set)
-    for el in b.fiches:
+    for el in b.items:
         for cid in el.collections:
-            k = e.cle[cid]
-            if cid not in couvertes and k != racine and e.sous(k, racine):
-                res[el.id].add('/'.join(e.chemin(k).split('/')[1:3]))
+            k = e.key[cid]
+            if cid not in covered and k != root and e.under(k, root):
+                res[el.id].add('/'.join(e.path(k).split('/')[1:3]))
     return res
 
 
-def _cite(operateur: str, valeur: str, nom: str) -> bool:
-    if operateur in ('contains', 'doesNotContain'):
-        return bool(valeur) and valeur.casefold() in nom.casefold()
-    return valeur == nom
+def _cites(operator: str, value: str, name: str) -> bool:
+    if operator in ('contains', 'doesNotContain'):
+        return bool(value) and value.casefold() in name.casefold()
+    return value == name
 
 
-def usages(b: Bibliotheque, cfg: Config) -> dict[str, Usage]:
-    masquees = filtre.cles_masquees(b, cfg)
-    themes = themes_des_fiches(b, cfg)
+def usages(b: Library, cfg: Config) -> dict[str, Usage]:
+    hidden = privacy.hidden_keys(b, cfg)
+    themes = themes_of_items(b, cfg)
     res: dict[str, Usage] = {}
-    for el in b.elements.values():
-        fiche = fiche_de(b, el)
-        for nom, typ in el.tags:
-            u = res.setdefault(nom, Usage(nom))
+    for el in b.all_items.values():
+        item = item_of(b, el)
+        for name, typ in el.tags:
+            u = res.setdefault(name, Usage(name))
             u.types.add(typ)
             u.occurrences[typ] += 1
-            u.elements.add(el.id)
-            if not el.est_fiche:
-                u.enfants += 1
+            u.all_items.add(el.id)
+            if not el.is_item:
+                u.children += 1
                 u.annotations += el.type == 'annotation'
-            if fiche is not None and fiche in b.elements:
-                u.fiches.add(fiche)
+            if item is not None and item in b.all_items:
+                u.items.add(item)
     for u in res.values():
-        for fiche in u.fiches:
-            u.themes.update(themes.get(fiche, ()))
-        u.confidentiel = all(b.elements[i].cle in masquees for i in u.elements)
-    for rang, (nom, couleur) in enumerate(b.couleurs, 1):
-        if nom in res:
-            res[nom].couleur, res[nom].rang_couleur = couleur, rang
-    for recherche, operateur, valeur in b.recherches_tags:
-        for nom, u in res.items():
-            if _cite(operateur, valeur, nom) and recherche not in u.recherches:
-                u.recherches.append(recherche)
+        for item in u.items:
+            u.themes.update(themes.get(item, ()))
+        u.confidential = all(b.all_items[i].key in hidden for i in u.all_items)
+    for rank, (name, color) in enumerate(b.colors, 1):
+        if name in res:
+            res[name].color, res[name].color_rank = color, rank
+    for search, operator, value in b.tag_searches:
+        for name, u in res.items():
+            if _cites(operator, value, name) and search not in u.searches:
+                u.searches.append(search)
     return res
 
 
-def concepts_du_plan(cfg: Config) -> list[str]:
-    """Concepts définis dans la section `# Concepts` de plan.md, un titre `## #nom` chacun (D154)."""
-    chemin = cfg.dossier_travail / f.PLAN
-    if not chemin.is_file():
+def outline_concepts(cfg: Config) -> list[str]:
+    """Concepts defined in the `# Concepts` section of plan.md, one `## #name` heading each (D154)."""
+    path = cfg.workspace / f.OUTLINE
+    if not path.is_file():
         return []
-    res, dedans = [], False
-    for ligne in chemin.read_text(encoding='utf-8').splitlines():
-        if m := re.match(r'^#\s+(.*?)\s*$', ligne):
-            dedans = norm(m.group(1)) == 'concepts'
-        elif dedans and (m := re.match(r'^##\s+(.*?)\s*$', ligne)):
+    res, contained = [], False
+    for line in path.read_text(encoding='utf-8').splitlines():
+        if m := re.match(r'^#\s+(.*?)\s*$', line):
+            contained = norm(m.group(1)) == 'concepts'
+        elif contained and (m := re.match(r'^##\s+(.*?)\s*$', line)):
             res.append(m.group(1))
     return res
 
 
-# --- Fichier de suivi -------------------------------------------------------------
+# --- Tracking file -------------------------------------------------------------
 
 @dataclass
-class Entree:
-    nom: str
+class Entry:
+    name: str
     type: str = ''
-    effectif: int = 0
+    count: int = 0
     dispersion: int = 0
     themes: list[str] = field(default_factory=list)
-    theme: str = ''  # thème du plan que le tag double (D154)
-    recherches: list[str] = field(default_factory=list)
-    sort: str = ''
-    cible: str = ''
+    theme: str = ''  # theme of the plan that the tag duplicates (D154)
+    searches: list[str] = field(default_factory=list)
+    action: str = ''
+    target: str = ''
     source: str = ZC
-    classe: str = DOUTEUX
+    grade: str = DOUBTFUL
     decision: str = ''
     note: str = ''
-    variantes: list[str] = field(default_factory=list)  # noms ramenés à `nom` avant le sort
+    variants: list[str] = field(default_factory=list)  # names brought back to `name` before the fate
 
 
 @dataclass
-class Variantes:
-    noms: list[str]
-    cible: str
-    classe: str = DOUTEUX
+class Variants:
+    names: list[str]
+    target: str
+    grade: str = DOUBTFUL
     source: str = ZC
     decision: str = ''
     note: str = ''
 
 
 @dataclass
-class Suivi:
-    automatiques: str = ''  # décision de la règle globale
-    importes: str = ''  # décision pour les mots-clés importés
-    tags: list[Entree] = field(default_factory=list)
-    variantes: list[Variantes] = field(default_factory=list)
-    # Renseignés par l'inventaire, écrits en commentaire ou dans rangement.toml.
-    resume_automatiques: str = ''
-    resume_importes: str = ''
-    a_ranger: list = field(default_factory=list)  # propositions de rangement (rangement.Entree, source « tag »)
+class Tracking:
+    automatic: str = ''  # decision of the global rule
+    imported: str = ''  # decision for imported keywords
+    tags: list[Entry] = field(default_factory=list)
+    variants: list[Variants] = field(default_factory=list)
+    # Filled in by the inventory, written as a comment or in rangement.toml.
+    automatic_summary: str = ''
+    imported_summary: str = ''
+    pending: list = field(default_factory=list)  # filing proposals (filing.Entry, source « tag »)
 
 
-def _decision(v: str, ou: str, chemin) -> str:
-    if v not in ('', ACCEPTER, REFUSER):
-        raise SystemExit(f'{chemin} : décision inconnue « {v} » ({ou}). Décisions possibles : "", "{ACCEPTER}", '
-                         f'"{REFUSER}".')
+def _decision(v: str, where: str, path) -> str:
+    if v not in ('', ACCEPT, REJECT):
+        raise SystemExit(L(en=f'{path}: unknown decision "{v}" ({where}). Possible decisions: "", "{ACCEPT}", '
+                              f'"{REJECT}".',
+                           fr=f'{path} : décision inconnue « {v} » ({where}). Décisions possibles : "", "{ACCEPT}", '
+                              f'"{REJECT}".'))
     return v
 
 
-def charger(cfg: Config) -> Suivi:
-    chemin = cfg.suivi / FICHIER
-    if not chemin.is_file():
-        return Suivi()
-    texte = chemin.read_text(encoding='utf-8')
+def load(cfg: Config) -> Tracking:
+    path = cfg.tracking / FILE
+    if not path.is_file():
+        return Tracking()
+    text = path.read_text(encoding='utf-8')
     try:
-        brut = tomllib.loads(texte)
+        raw = tomllib.loads(text)
     except tomllib.TOMLDecodeError as e:
-        raise SystemExit(f'{chemin} illisible ({e}). Corriger le fichier, ou le supprimer pour repartir de zéro.')
-    m = cfg.methode
-    s = Suivi()
+        raise SystemExit(L(en=f'{path} unreadable ({e}). Fix the file, or delete it to start again from scratch.',
+                           fr=f'{path} illisible ({e}). Corriger le fichier, ou le supprimer pour repartir de zéro.'))
+    m = cfg.method
+    s = Tracking()
     for section in ('automatiques', 'importes'):
-        d = brut.get(section, {})
-        if d.get('sort', SUPPRIMER) != SUPPRIMER:
-            raise SystemExit(f'{chemin} : [{section}] ne connaît que sort = "{SUPPRIMER}". Pour garder ces tags, '
-                             f'écrire decision = "{REFUSER}".')
-        setattr(s, section, _decision(d.get('decision', ''), f'[{section}]', chemin))
-        # Résumé écrit par l'inventaire sous l'en-tête de la section, gardé quand une commande réécrit le fichier.
-        if section in brut and (r := re.search(rf'^\[{section}\][ \t]*\r?\n# (.*?)\r?$', texte, re.M)):
-            setattr(s, f'resume_{section}', r.group(1))
-    for d in brut.get('tag', []):
-        nom = d.get('nom', '')
-        if not nom:
-            raise SystemExit(f'{chemin} : une entrée [[tag]] n\'a pas de nom.')
-        sort = d.get('sort', '')
-        if sort and norm(sort) not in SORTS:
-            raise SystemExit(f'{chemin} : sort inconnu « {sort} » pour « {nom} ». Sorts possibles : '
-                             f'{", ".join(SORTS.values())}.')
-        e = Entree(nom, d.get('type', ''), int(d.get('effectif', 0)), int(d.get('dispersion', 0)),
+        d = raw.get(section, {})
+        if d.get('sort', DELETE) != DELETE:
+            raise SystemExit(L(en=f'{path}: [{section}] only knows sort = "{DELETE}". To keep these tags, '
+                                  f'write decision = "{REJECT}".',
+                               fr=f'{path} : [{section}] ne connaît que sort = "{DELETE}". Pour garder ces tags, '
+                                  f'écrire decision = "{REJECT}".'))
+        setattr(s, SECTIONS[section], _decision(d.get('decision', ''), f'[{section}]', path))
+        # Summary written by the inventory under the section header, kept when a command rewrites the file.
+        if section in raw and (r := re.search(rf'^\[{section}\][ \t]*\r?\n# (.*?)\r?$', text, re.M)):
+            setattr(s, f'{SECTIONS[section]}_summary', r.group(1))
+    for d in raw.get('tag', []):
+        name = d.get('nom', '')
+        if not name:
+            raise SystemExit(L(en=f'{path}: a [[tag]] entry has no name.',
+                               fr=f'{path} : une entrée [[tag]] n\'a pas de nom.'))
+        action = d.get('sort', '')
+        if action and norm(action) not in ACTIONS:
+            raise SystemExit(L(en=f'{path}: unknown sort "{action}" for "{name}". Possible values: '
+                                  f'{", ".join(ACTIONS.values())}.',
+                               fr=f'{path} : sort inconnu « {action} » pour « {name} ». Sorts possibles : '
+                                  f'{", ".join(ACTIONS.values())}.'))
+        e = Entry(name, d.get('type', ''), int(d.get('effectif', 0)), int(d.get('dispersion', 0)),
                    list(d.get('themes', [])), d.get('theme', ''), list(d.get('recherches', [])),
-                   SORTS[norm(sort)] if sort else '', d.get('cible', ''), _source(d.get('source', ZC), nom, chemin),
-                   d.get('classe', DOUTEUX), _decision(d.get('decision', ''), nom, chemin), d.get('note', ''),
+                   ACTIONS[norm(action)] if action else '', d.get('cible', ''), _source(d.get('source', ZC), name, path),
+                   d.get('classe', DOUBTFUL), _decision(d.get('decision', ''), name, path), d.get('note', ''),
                    list(d.get('variantes', [])))
-        _verifier_cible(e.sort, e.cible, e.decision, nom, cfg, chemin)
+        _check_target(e.action, e.target, e.decision, name, cfg, path)
         s.tags.append(e)
-    for d in brut.get('variantes', []):
-        noms, cible = list(d.get('noms', [])), d.get('cible', '')
-        if not noms or not cible:
-            raise SystemExit(f'{chemin} : un groupe [[variantes]] doit avoir des `noms` et une `cible` ({noms}).')
-        if filtre.tag_exclu(cible, cfg):
-            raise SystemExit(f'{chemin} : « {cible} » sert au filtre de confidentialité, il ne peut pas être une cible.')
-        s.variantes.append(Variantes(noms, cible, d.get('classe', DOUTEUX), _source(d.get('source', ZC), cible, chemin),
-                                     _decision(d.get('decision', ''), cible, chemin), d.get('note', '')))
+    for d in raw.get('variantes', []):
+        names, target = list(d.get('noms', [])), d.get('cible', '')
+        if not names or not target:
+            raise SystemExit(L(en=f'{path}: a [[variantes]] group must have `noms` and a `cible` ({names}).',
+                               fr=f'{path} : un groupe [[variantes]] doit avoir des `noms` et une `cible` ({names}).'))
+        if privacy.excluded_tag(target, cfg):
+            raise SystemExit(L(en=f'{path}: "{target}" is used by the privacy filter, it cannot be a target.',
+                           fr=f'{path} : « {target} » sert au filtre de confidentialité, il ne peut pas être une '
+                              'cible.'))
+        s.variants.append(Variants(names, target, d.get('classe', DOUBTFUL), _source(d.get('source', ZC), target, path),
+                                     _decision(d.get('decision', ''), target, path), d.get('note', '')))
     return s
 
 
-def _source(v: str, nom: str, chemin) -> str:
-    if v not in (ZC, AGENT, UTILISATEUR):
-        raise SystemExit(f'{chemin} : source inconnue « {v} » pour « {nom} » ("{ZC}", "{AGENT}" ou "{UTILISATEUR}").')
+def _source(v: str, name: str, path) -> str:
+    if v not in (ZC, AGENT, USER):
+        raise SystemExit(L(en=f'{path}: unknown source "{v}" for "{name}" ("{ZC}", "{AGENT}" or "{USER}").',
+                           fr=f'{path} : source inconnue « {v} » pour « {name} » ("{ZC}", "{AGENT}" ou "{USER}").'))
     return v
 
 
-def _verifier_cible(sort: str, cible: str, decision: str, nom: str, cfg: Config, chemin) -> None:
-    m = cfg.methode
-    if sort in (CONCEPT, ETAT, FUSIONNER) and decision == ACCEPTER and not cible:
-        raise SystemExit(f'{chemin} : « {nom} » ({sort}) est accepté sans cible.')
-    if not cible:
+def _check_target(action: str, target: str, decision: str, name: str, cfg: Config, path) -> None:
+    m = cfg.method
+    if action in (CONCEPT, STATUS, MERGE) and decision == ACCEPT and not target:
+        raise SystemExit(L(en=f'{path}: "{name}" ({action}) is accepted without a target.',
+                           fr=f'{path} : « {name} » ({action}) est accepté sans cible.'))
+    if not target:
         return
-    if filtre.tag_exclu(cible, cfg):
-        raise SystemExit(f'{chemin} : « {cible} » sert au filtre de confidentialité, il ne peut pas être une cible.')
-    if sort == CONCEPT and m.prefixe_concept and not cible.startswith(m.prefixe_concept):
-        raise SystemExit(f'{chemin} : la cible du concept « {nom} » doit commencer par « {m.prefixe_concept} » '
-                         f'(« {cible} »).')
-    if sort == ETAT and cible not in (*m.etats, *m.autres_tags):
-        raise SystemExit(f'{chemin} : « {cible} », cible de « {nom} », n\'est ni un état ni une marque de la méthode '
-                         f'({", ".join((*m.etats, *m.autres_tags))}).')
+    if privacy.excluded_tag(target, cfg):
+        raise SystemExit(L(en=f'{path}: "{target}" is used by the privacy filter, it cannot be a target.',
+                           fr=f'{path} : « {target} » sert au filtre de confidentialité, il ne peut pas être une '
+                              'cible.'))
+    if action == CONCEPT and m.concept_prefix and not target.startswith(m.concept_prefix):
+        raise SystemExit(L(en=f'{path}: the target of the concept "{name}" must start with "{m.concept_prefix}" '
+                              f'("{target}").',
+                           fr=f'{path} : la cible du concept « {name} » doit commencer par « {m.concept_prefix} » '
+                              f'(« {target} »).'))
+    if action == STATUS and target not in (*m.statuses, *m.other_tags):
+        raise SystemExit(L(en=f'{path}: "{target}", target of "{name}", is neither a status nor a mark of the '
+                              f'method ({", ".join((*m.statuses, *m.other_tags))}).',
+                           fr=f'{path} : « {target} », cible de « {name} », n\'est ni un état ni une marque de la '
+                              f'méthode ({", ".join((*m.statuses, *m.other_tags))}).'))
 
 
-def _titres(b: Bibliotheque, u: Usage | None, masquees: set[str]) -> str:
+def _titles(b: Library, u: Usage | None, hidden: set[str]) -> str:
     if u is None:
         return ''
-    fiches = sorted((b.elements[i] for i in u.fiches if b.elements[i].cle not in masquees), key=lambda e: norm(e.titre))
-    return ' · '.join(f'{e.auteur or "?"} {annee(e) or "s. d."}, « {e.titre[:60] or "sans titre"} »'
-                      for e in fiches[:TITRES])
+    items = sorted((b.all_items[i] for i in u.items if b.all_items[i].key not in hidden), key=lambda e: norm(e.title))
+    undated, untitled = L(en='n.d.', fr='s. d.'), L(en='untitled', fr='sans titre')
+    return ' · '.join(L(en=f'{e.author or "?"} {year(e) or undated}, "{e.title[:60] or untitled}"',
+                        fr=f'{e.author or "?"} {year(e) or undated}, « {e.title[:60] or untitled} »')
+                      for e in items[:TITLES])
 
 
-def ecrire(cfg: Config, s: Suivi, b: Bibliotheque) -> None:
-    """Écrit `suivi/tags.toml`, et ajoute à `suivi/rangement.toml` les fiches à ranger avant de supprimer un tag
-    qui double un thème (D154)."""
+def write(cfg: Config, s: Tracking, b: Library) -> None:
+    """Write `suivi/tags.toml`, and add to `suivi/rangement.toml` the items to file before deleting a tag
+    that duplicates a theme (D154)."""
     u = usages(b, cfg)
-    masquees = filtre.cles_masquees(b, cfg)
+    hidden = privacy.hidden_keys(b, cfg)
 
-    def affiche(nom: str) -> str:
-        return identifiant(nom) if nom in u and u[nom].confidentiel else nom
+    def shown(name: str) -> str:
+        return identifier(name) if name in u and u[name].confidential else name
 
-    L = [EN_TETE, '[automatiques]']
-    if s.resume_automatiques:
-        L.append(f'# {s.resume_automatiques}')
-    L += [f'sort = "{SUPPRIMER}"', f'decision = {_toml(s.automatiques)}', '']
-    if s.resume_importes or s.importes:
-        L += ['[importes]'] + ([f'# {s.resume_importes}'] if s.resume_importes else [])
-        L += [f'sort = "{SUPPRIMER}"', f'decision = {_toml(s.importes)}', '']
+    lines = [header(), '[automatiques]']
+    if s.automatic_summary:
+        lines.append(f'# {s.automatic_summary}')
+    lines += [f'sort = "{DELETE}"', f'decision = {_toml(s.automatic)}', '']
+    if s.imported_summary or s.imported:
+        lines += ['[importes]'] + ([f'# {s.imported_summary}'] if s.imported_summary else [])
+        lines += [f'sort = "{DELETE}"', f'decision = {_toml(s.imported)}', '']
     for e in s.tags:
-        L.append('[[tag]]')
-        if t := _titres(b, u.get(e.nom), masquees):
-            L.append(f'# {t}')
-        L += [f'nom = {_toml(affiche(e.nom))}', f'type = {_toml(e.type)}', f'effectif = {e.effectif}',
+        lines.append('[[tag]]')
+        if t := _titles(b, u.get(e.name), hidden):
+            lines.append(f'# {t}')
+        lines += [f'nom = {_toml(shown(e.name))}', f'type = {_toml(e.type)}', f'effectif = {e.count}',
               f'dispersion = {e.dispersion}', f'themes = {_toml(e.themes)}']
-        L += [f'theme = {_toml(e.theme)}'] if e.theme else []
-        L += [f'recherches = {_toml(e.recherches)}'] if e.recherches else []
-        L += [f'variantes = {_toml([affiche(n) for n in e.variantes])}'] if e.variantes else []
-        L += [f'sort = {_toml(e.sort)}', f'cible = {_toml(e.cible)}', f'source = {_toml(e.source)}',
-              f'classe = {_toml(e.classe)}', f'decision = {_toml(e.decision)}']
-        L += [f'note = {_toml(e.note)}'] if e.note else []
-        L.append('')
-    for g in s.variantes:
-        L.append('[[variantes]]')
-        L.append('# ' + ' · '.join(f'{affiche(n)} ({len(u[n].fiches)}, {u[n].type_lisible})' if n in u
-                                   else f'{affiche(n)} (absent)' for n in g.noms))
-        L += [f'noms = {_toml([affiche(n) for n in g.noms])}', f'cible = {_toml(g.cible)}',
-              f'classe = {_toml(g.classe)}', f'source = {_toml(g.source)}', f'decision = {_toml(g.decision)}']
-        L += [f'note = {_toml(g.note)}'] if g.note else []
-        L.append('')
-    cfg.suivi.mkdir(parents=True, exist_ok=True)
-    ecrire_toml(cfg.suivi / FICHIER, L)
-    if s.a_ranger:
-        r.ecrire(cfg, r.charger(cfg) + s.a_ranger, b, filtre.exclues(b, cfg))
+        lines += [f'theme = {_toml(e.theme)}'] if e.theme else []
+        lines += [f'recherches = {_toml(e.searches)}'] if e.searches else []
+        lines += [f'variantes = {_toml([shown(n) for n in e.variants])}'] if e.variants else []
+        lines += [f'sort = {_toml(e.action)}', f'cible = {_toml(e.target)}', f'source = {_toml(e.source)}',
+              f'classe = {_toml(e.grade)}', f'decision = {_toml(e.decision)}']
+        lines += [f'note = {_toml(e.note)}'] if e.note else []
+        lines.append('')
+    for g in s.variants:
+        lines.append('[[variantes]]')
+        lines.append('# ' + ' · '.join(f'{shown(n)} ({len(u[n].items)}, {type_shown(u[n].readable_type)})' if n in u
+                                      else L(en=f'{shown(n)} (absent)', fr=f'{shown(n)} (absent)')
+                                      for n in g.names))
+        lines += [f'noms = {_toml([shown(n) for n in g.names])}', f'cible = {_toml(g.target)}',
+              f'classe = {_toml(g.grade)}', f'source = {_toml(g.source)}', f'decision = {_toml(g.decision)}']
+        lines += [f'note = {_toml(g.note)}'] if g.note else []
+        lines.append('')
+    cfg.tracking.mkdir(parents=True, exist_ok=True)
+    write_toml(cfg.tracking / FILE, lines)
+    if s.pending:
+        r.write(cfg, r.load(cfg) + s.pending, b, privacy.excluded_items(b, cfg))
 
 
-# --- Décisions par commande (D177) ------------------------------------------------
+# --- Decisions by command (D177) ------------------------------------------------
 
-REGLES = {'automatiques': 'des tags automatiques', 'importes': 'des mots-clés importés'}
-
-
-def _nfc(nom: str) -> str:
-    """Nom comparé sous une seule forme Unicode, celle que tape l'agent pouvant différer de celle de la base."""
-    return unicodedata.normalize('NFC', nom)
+def _rule_names() -> dict[str, str]:
+    return {'automatiques': L(en='for automatic tags', fr='des tags automatiques'),
+            'importes': L(en='for imported keywords', fr='des mots-clés importés')}
 
 
-def _formes(noms, a=None) -> str:
-    """Noms qui s'affichent pareil, distingués par leurs points de code (`ascii`), sous l'identifiant d'un tag
-    confidentiel quand l'analyse `a` est donnée."""
-    def une(n: str) -> str:
-        if a is not None and _affiche(a, n) != n:
-            return _affiche(a, n)
-        quelle = ', forme composée NFC' if n == _nfc(n) else (
-            ', forme décomposée NFD' if n == unicodedata.normalize('NFD', n) else '')
-        return f'« {n} » ({ascii(n)}{quelle})'
-    return ' ; '.join(une(n) for n in sorted(noms, key=ascii))
+def _quoted(names) -> str:
+    """Names between quotes, in the style of the current language (« x », « y »)."""
+    names = list(names)
+    if lang.current() == 'en':
+        return '"' + '", "'.join(names) + '"'
+    return '«' + '», «'.join(f' {x} ' for x in names) + '»'
 
 
-def _indexer(paires) -> dict[str, dict[str, list]]:
-    """Objets (entrées ou groupes) désignés par chaque nom, rangés par forme NFC puis par nom exact."""
+# Section of tags.toml -> attribute of `Tracking` (D209).
+SECTIONS = {'automatiques': 'automatic', 'importes': 'imported'}
+
+
+def _nfc(name: str) -> str:
+    """Name compared under a single Unicode form, since the one the agent types may differ from the database's."""
+    return unicodedata.normalize('NFC', name)
+
+
+def _forms(names, a=None) -> str:
+    """Names that display the same, told apart by their code points (`ascii`), under the identifier of a
+    confidential tag when the analysis `a` is given."""
+    def one(n: str) -> str:
+        if a is not None and _displayed(a, n) != n:
+            return _displayed(a, n)
+        which = L(en=', composed form NFC', fr=', forme composée NFC') if n == _nfc(n) else (
+            L(en=', decomposed form NFD', fr=', forme décomposée NFD') if n == unicodedata.normalize('NFD', n) else '')
+        return L(en=f'"{n}" ({ascii(n)}{which})', fr=f'« {n} » ({ascii(n)}{which})')
+    return ' ; '.join(one(n) for n in sorted(names, key=ascii))
+
+
+def _indexer(pairs) -> dict[str, dict[str, list]]:
+    """Objects (entries or groups) designated by each name, arranged by NFC form then by exact name."""
     index: dict[str, dict[str, list]] = defaultdict(lambda: defaultdict(list))
-    for nom, o in paires:
-        liste = index[_nfc(nom)][nom]
-        if all(x is not o for x in liste):
-            liste.append(o)
+    for name, o in pairs:
+        listing = index[_nfc(name)][name]
+        if all(x is not o for x in listing):
+            listing.append(o)
     return index
 
 
-def _designes(nom: str, index, chemin) -> list:
-    """Objets désignés par `nom`, sous sa forme exacte d'abord. Sinon sous sa forme NFC, l'agent pouvant taper une
-    autre forme que celle du fichier, à condition qu'elle ne désigne pas des objets différents sous plusieurs formes
-    Unicode, puisqu'elles s'affichent pareil et que juger l'une ne doit pas juger l'autre."""
-    formes = index.get(_nfc(nom), {})
-    if nom in formes:
-        return formes[nom]
-    objets = {id(o): o for liste in formes.values() for o in liste}
-    if len({frozenset(map(id, liste)) for liste in formes.values()}) > 1:
-        raise SystemExit(f'« {nom} » désigne plusieurs noms de {chemin} qui ne diffèrent que par leur forme Unicode '
-                         f'et s\'affichent pareil, {_formes(formes)}. Donner le nom sous sa forme exacte, copiée '
-                         'depuis le fichier.')
-    return list(objets.values())
+def _designated(name: str, index, path) -> list:
+    """Objects designated by `name`, under its exact form first. Otherwise under its NFC form, since the agent may type
+    a different form from the file's, provided it does not designate different objects under several Unicode
+    forms, since they display the same and judging one must not judge the other."""
+    forms = index.get(_nfc(name), {})
+    if name in forms:
+        return forms[name]
+    objects = {id(o): o for listing in forms.values() for o in listing}
+    if len({frozenset(map(id, listing)) for listing in forms.values()}) > 1:
+        raise SystemExit(L(en=f'"{name}" designates several names of {path} that differ only by their Unicode form '
+                              f'and display the same, {_forms(forms)}. Give the name in its exact form, copied from '
+                              'the file.',
+                           fr=f'« {name} » désigne plusieurs noms de {path} qui ne diffèrent que par leur forme '
+                              f'Unicode et s\'affichent pareil, {_forms(forms)}. Donner le nom sous sa forme exacte, '
+                              'copiée depuis le fichier.'))
+    return list(objects.values())
 
 
-def _sort(v: str) -> str:
-    if norm(v) not in SORTS:
-        raise SystemExit(f'Sort inconnu « {v} ». Sorts possibles : {", ".join(SORTS.values())}.')
-    return SORTS[norm(v)]
+def _action(v: str) -> str:
+    if norm(v) not in ACTIONS:
+        raise SystemExit(L(en=f'Unknown sort "{v}". Possible values: {", ".join(ACTIONS.values())}.',
+                           fr=f'Sort inconnu « {v} ». Sorts possibles : {", ".join(ACTIONS.values())}.'))
+    return ACTIONS[norm(v)]
 
 
-def decider(s: Suivi, cfg: Config, decision: str, noms=(), variantes=(), evidents: bool = False, sauf=(),
-            regles=(), sort: str = '', cible: str = '') -> int:
-    """Décisions prises par commande (D177, sur le modèle de D172), au lieu d'écrire le fichier à la main. `noms`
-    désigne des entrées [[tag]] par leur nom, `variantes` des groupes [[variantes]] par leur cible ou l'un de leurs
-    noms, `regles` les sections [automatiques] et [importes]. `evidents` accepte toutes les entrées et tous les
-    groupes évidents encore à juger, hors des noms de `sauf`. `sort` et `cible` changent la proposition des entrées
-    données (qui passent en source « agent »), `cible` celle des groupes. Seules les règles encore à juger changent.
-    Renvoie le nombre de décisions écrites."""
-    chemin = cfg.suivi / FICHIER
+def decide(s: Tracking, cfg: Config, decision: str, names=(), variants=(), obvious: bool = False, except_=(),
+            rules=(), action: str = '', target: str = '') -> int:
+    """Decisions taken by command (D177, modelled on D172), instead of writing the file by hand. `names`
+    designates [[tag]] entries by their name, `variants` [[variantes]] groups by their target or one of their
+    names, `rules` the [automatiques] and [importes] sections. `obvious` accepts all the entries and all the
+    obvious groups still to judge, except the names in `except_`. `action` and `target` change the proposal of the
+    given entries (which switch to source « agent »), `target` that of the groups. Only rules still to judge
+    change. Returns the number of decisions written."""
+    path = cfg.tracking / FILE
     n = 0
-    for section in regles:
-        quoi = REGLES[section]
-        if section == 'importes' and not s.resume_importes and not s.importes:
-            raise SystemExit(f'{chemin} n\'a pas de section [importes] : aucune fiche ne porte de mots-clés importés.')
-        if getattr(s, section):
-            raise SystemExit(f'La règle {quoi} est déjà décidée (« {getattr(s, section)} ») dans {chemin}. Pour revenir '
-                             f'dessus, changer decision à la main dans la section [{section}].')
-        setattr(s, section, decision)
+    for section in rules:
+        what = _rule_names()[section]
+        if section == 'importes' and not s.imported_summary and not s.imported:
+            raise SystemExit(L(en=f'{path} has no [importes] section: no item carries imported keywords.',
+                               fr=f'{path} n\'a pas de section [importes] : aucune fiche ne porte de mots-clés '
+                                  'importés.'))
+        if getattr(s, SECTIONS[section]):
+            current = getattr(s, SECTIONS[section])
+            raise SystemExit(L(en=f'The rule {what} is already decided ("{current}") in {path}. To go back on it, '
+                                  f'change decision by hand in the [{section}] section.',
+                               fr=f'La règle {what} est déjà décidée (« {current} ») dans {path}. Pour revenir '
+                                  f'dessus, changer decision à la main dans la section [{section}].'))
+        setattr(s, SECTIONS[section], decision)
         n += 1
 
-    tous = {_nfc(e.nom) for e in s.tags} | {_nfc(x) for g in s.variantes for x in (g.cible, *g.noms)}
-    index_tags = _indexer((e.nom, e) for e in s.tags)
-    index_groupes = _indexer((x, g) for g in s.variantes for x in dict.fromkeys((g.cible, *g.noms)))
+    all_entries = {_nfc(e.name) for e in s.tags} | {_nfc(x) for g in s.variants for x in (g.target, *g.names)}
+    tag_index = _indexer((e.name, e) for e in s.tags)
+    group_index = _indexer((x, g) for g in s.variants for x in dict.fromkeys((g.target, *g.names)))
 
-    def a_juger(nom: str, index) -> list:
-        return [o for o in _designes(nom, index, chemin) if not o.decision]
+    def to_judge(name: str, index) -> list:
+        return [o for o in _designated(name, index, path) if not o.decision]
 
-    def refuser_inconnus(demandes, index, quoi: str, autre=None, ailleurs: str = '') -> None:
-        inconnus = [x for x in demandes if not a_juger(x, index)]
-        if not inconnus:
+    def reject_unknown(requested, index, what: str, other=None, elsewhere: str = '') -> None:
+        unknowns = [x for x in requested if not to_judge(x, index)]
+        if not unknowns:
             return
-        morceaux = []
-        if autre is not None and (mal_places := [x for x in inconnus if a_juger(x, autre)]):
-            morceaux.append(f'«{"», «".join(f" {x} " for x in mal_places)}» désigne {ailleurs}.')
-            inconnus = [x for x in inconnus if x not in mal_places]
-        absents = '», «'.join(f' {x} ' for x in inconnus if _nfc(x) not in tous)
-        decides = '», «'.join(f' {x} ' for x in inconnus if _nfc(x) in tous)
-        if absents:
-            morceaux.append(f'«{absents}» ne figure pas dans {chemin} ({quoi}). Vérifier le nom, en entier et entre '
-                            'guillemets (non protégé, un nom qui commence par # est pris pour un commentaire), ou '
-                            'relancer `zc tags inventaire`. Un tag sans entrée s\'ajoute par `zc tags ajouter`.')
-        if decides:
-            morceaux.append(f'«{decides}» : rien à juger sous ce nom ({quoi}), la décision est déjà prise. Une '
-                            'décision prise se change à la main dans le fichier.')
-        raise SystemExit(' '.join(morceaux))
+        chunks = []
+        if other is not None and (misplaced := [x for x in unknowns if to_judge(x, other)]):
+            quoted = _quoted(misplaced)
+            chunks.append(L(en=f'{quoted} designates {elsewhere}.', fr=f'{quoted} désigne {elsewhere}.'))
+            unknowns = [x for x in unknowns if x not in misplaced]
+        missing = _quoted(x for x in unknowns if _nfc(x) not in all_entries)
+        decided_names = _quoted(x for x in unknowns if _nfc(x) in all_entries)
+        if any(_nfc(x) not in all_entries for x in unknowns):
+            chunks.append(L(en=f'{missing} is not in {path} ({what}). Check the name, in full and between quotes '
+                               '(unprotected, a name that starts with # is taken for a comment), or run '
+                               '`zc tags inventory` again. A tag with no entry is added by `zc tags add`.',
+                            fr=f'{missing} ne figure pas dans {path} ({what}). Vérifier le nom, en entier et entre '
+                               'guillemets (non protégé, un nom qui commence par # est pris pour un commentaire), ou '
+                               'relancer `zc tags inventory`. Un tag sans entrée s\'ajoute par `zc tags add`.'))
+        if any(_nfc(x) in all_entries for x in unknowns):
+            chunks.append(L(en=f'{decided_names}: nothing to judge under this name ({what}), the decision is already '
+                               'taken. A decision already taken is changed by hand in the file.',
+                            fr=f'{decided_names} : rien à juger sous ce nom ({what}), la décision est déjà prise. Une '
+                               'décision prise se change à la main dans le fichier.'))
+        raise SystemExit(' '.join(chunks))
 
-    refuser_inconnus(noms, index_tags, 'entrées [[tag]]', index_groupes,
-                     'un groupe [[variantes]] à juger, à donner après --variantes')
-    refuser_inconnus(variantes, index_groupes, 'groupes [[variantes]]', index_tags,
-                     'une entrée [[tag]] à juger, à donner sans --variantes')
-    # `sauf` écarte sous la forme NFC, toutes formes confondues, puisque trop écarter laisse seulement à juger.
-    refuser_inconnus([x for x in sauf if _nfc(x) not in tous], {}, 'noms de tags et de groupes')
-    sort = _sort(sort) if sort else ''
+    reject_unknown(names, tag_index, L(en='[[tag]] entries', fr='entrées [[tag]]'), group_index,
+                   L(en='a [[variantes]] group to judge, to give after --variants',
+                     fr='un groupe [[variantes]] à juger, à donner après --variants'))
+    reject_unknown(variants, group_index, L(en='[[variantes]] groups', fr='groupes [[variantes]]'), tag_index,
+                   L(en='a [[tag]] entry to judge, to give without --variants',
+                     fr='une entrée [[tag]] à juger, à donner sans --variants'))
+    # `except_` excludes under the NFC form, all forms combined, since excluding too much only leaves more to judge.
+    reject_unknown([x for x in except_ if _nfc(x) not in all_entries], {},
+                   L(en='names of tags and groups', fr='noms de tags et de groupes'))
+    action = _action(action) if action else ''
 
-    vus: set[int] = set()
-    for nom in noms:
-        for e in a_juger(nom, index_tags):
-            if id(e) in vus:
+    seen_set: set[int] = set()
+    for name in names:
+        for e in to_judge(name, tag_index):
+            if id(e) in seen_set:
                 continue
-            vus.add(id(e))
-            if sort or cible:
-                if sort and sort != e.sort:
-                    e.sort, e.cible = sort, ''
-                e.cible = cible or e.cible
+            seen_set.add(id(e))
+            if action or target:
+                if action and action != e.action:
+                    e.action, e.target = action, ''
+                e.target = target or e.target
                 e.source = AGENT if e.source == ZC else e.source
-            if decision == ACCEPTER and not e.sort:
-                raise SystemExit(f'« {e.nom} » n\'a pas de sort proposé. Le donner avec --sort.')
+            if decision == ACCEPT and not e.action:
+                raise SystemExit(L(en=f'"{e.name}" has no proposed sort. Give it with --action.',
+                                   fr=f'« {e.name} » n\'a pas de sort proposé. Le donner avec --action.'))
             e.decision = decision
-            _verifier_cible(e.sort, e.cible, e.decision, e.nom, cfg, chemin)
+            _check_target(e.action, e.target, e.decision, e.name, cfg, path)
             n += 1
-    for nom in variantes:
-        for g in a_juger(nom, index_groupes):
-            if id(g) in vus:
+    for name in variants:
+        for g in to_judge(name, group_index):
+            if id(g) in seen_set:
                 continue
-            vus.add(id(g))
-            if cible:
-                if filtre.tag_exclu(cible, cfg):
-                    raise SystemExit(f'« {cible} » sert au filtre de confidentialité, il ne peut pas être une cible.')
-                g.cible, g.source = cible, AGENT if g.source == ZC else g.source
+            seen_set.add(id(g))
+            if target:
+                if privacy.excluded_tag(target, cfg):
+                    raise SystemExit(L(en=f'"{target}" is used by the privacy filter, it cannot be a target.',
+                                       fr=f'« {target} » sert au filtre de confidentialité, il ne peut pas être une '
+                                          'cible.'))
+                g.target, g.source = target, AGENT if g.source == ZC else g.source
             g.decision = decision
             n += 1
-    if evidents:
-        ecartes = {_nfc(x) for x in sauf}
+    if obvious:
+        skipped = {_nfc(x) for x in except_}
         for e in s.tags:
-            if e.classe == EVIDENT and not e.decision and e.sort and _nfc(e.nom) not in ecartes:
-                e.decision = ACCEPTER
-                _verifier_cible(e.sort, e.cible, e.decision, e.nom, cfg, chemin)
+            if e.grade == OBVIOUS and not e.decision and e.action and _nfc(e.name) not in skipped:
+                e.decision = ACCEPT
+                _check_target(e.action, e.target, e.decision, e.name, cfg, path)
                 n += 1
-        for g in s.variantes:
-            if g.classe == EVIDENT and not g.decision and not {_nfc(x) for x in (g.cible, *g.noms)} & ecartes:
-                g.decision = ACCEPTER
+        for g in s.variants:
+            if g.grade == OBVIOUS and not g.decision and not {_nfc(x) for x in (g.target, *g.names)} & skipped:
+                g.decision = ACCEPT
                 n += 1
     return n
 
 
-def ajouter(s: Suivi, cfg: Config, b: Bibliotheque, noms, sort: str, cible: str = '',
-            utilisateur: bool = False) -> int:
-    """Entrées [[tag]] nouvelles, déjà acceptées, pour des tags que l'inventaire n'a pas proposés (tags hors familles
-    signalés par le tri de l'Inbox, traductions, tag protégé à la demande de l'utilisateur). Source « agent », ou
-    « utilisateur », seule source qui change un tag protégé ou confidentiel (D151, D156). Renvoie leur nombre."""
-    chemin = cfg.suivi / FICHIER
-    a = _Analyse(b, cfg)
-    sort = _sort(sort)
-    deja = {e.nom for e in s.tags}
-    for nom in noms:
-        # Nom réel porté dans la bibliothèque, qui peut avoir une autre forme Unicode que le nom tapé. Enregistrer le
-        # nom tapé donnerait une règle acceptée qui ne s'applique à rien.
-        reel = _reel(a, nom)
-        nom_suivi = _affiche(a, reel)  # identifiant pour un tag confidentiel, comme dans le fichier relu
-        if nom_suivi in deja:
-            raise SystemExit(f'« {nom} » a déjà une entrée [[tag]] dans {chemin}. La juger avec `zc tags accepter` ou '
-                             '`zc tags refuser`.')
-        e = a.stats(Entree(reel), a.u[reel])
-        e.nom, e.sort, e.cible, e.decision = nom_suivi, sort, cible, ACCEPTER
-        e.source = UTILISATEUR if utilisateur else AGENT
-        _verifier_cible(e.sort, e.cible, e.decision, nom_suivi, cfg, chemin)
+def add(s: Tracking, cfg: Config, b: Library, names, action: str, target: str = '',
+            user: bool = False) -> int:
+    """New [[tag]] entries, already accepted, for tags the inventory did not propose (tags outside the families
+    flagged by the Inbox triage, translations, protected tag at the user's request). Source « agent », or
+    « utilisateur », the only source that changes a protected or confidential tag (D151, D156). Returns their number."""
+    path = cfg.tracking / FILE
+    a = _Analysis(b, cfg)
+    action = _action(action)
+    already = {e.name for e in s.tags}
+    for name in names:
+        # Real name carried in the library, which may have another Unicode form than the typed name. Recording the
+        # typed name would give an accepted rule that applies to nothing.
+        real = _real(a, name)
+        tracked_name = _displayed(a, real)  # identifier for a confidential tag, as in the re-read file
+        if tracked_name in already:
+            raise SystemExit(L(en=f'"{name}" already has a [[tag]] entry in {path}. Judge it with `zc tags accept` '
+                                  'or `zc tags reject`.',
+                               fr=f'« {name} » a déjà une entrée [[tag]] dans {path}. La juger avec `zc tags accept` '
+                                  'ou `zc tags reject`.'))
+        e = a.stats(Entry(real), a.u[real])
+        e.name, e.action, e.target, e.decision = tracked_name, action, target, ACCEPT
+        e.source = USER if user else AGENT
+        _check_target(e.action, e.target, e.decision, tracked_name, cfg, path)
         s.tags.append(e)
-        deja.add(nom_suivi)
-    s.tags.sort(key=lambda e: norm(e.nom))
-    return len(noms)
+        already.add(tracked_name)
+    s.tags.sort(key=lambda e: norm(e.name))
+    return len(names)
 
 
-def _reel(a: '_Analyse', nom: str) -> str:
-    """Tag de la bibliothèque désigné par `nom` (ou par l'identifiant d'un tag confidentiel), sous sa forme exacte
-    d'abord, sinon sous sa forme NFC si un seul tag y correspond."""
-    if (n := a.reel(nom)) in a.u:
+def _real(a: '_Analysis', name: str) -> str:
+    """Library tag designated by `name` (or by the identifier of a confidential tag), under its exact form
+    first, otherwise under its NFC form if only one tag matches."""
+    if (n := a.real(name)) in a.u:
         return n
-    formes = [n for n in a.u if _nfc(n) == _nfc(nom)]
-    if not formes:
-        raise SystemExit(f'Aucun tag « {nom} » dans la bibliothèque. Vérifier le nom, en entier et entre guillemets.')
-    if len(formes) > 1:
-        raise SystemExit(f'« {nom} » désigne plusieurs tags de la bibliothèque qui ne diffèrent que par leur forme '
-                         f'Unicode et s\'affichent pareil, {_formes(formes, a)}. Donner le nom sous sa forme exacte, '
-                         'copiée depuis le rapport de l\'inventaire ou depuis Zotero.')
-    return formes[0]
+    forms = [n for n in a.u if _nfc(n) == _nfc(name)]
+    if not forms:
+        raise SystemExit(L(en=f'No tag "{name}" in the library. Check the name, in full and between quotes.',
+                           fr=f'Aucun tag « {name} » dans la bibliothèque. Vérifier le nom, en entier et entre '
+                              'guillemets.'))
+    if len(forms) > 1:
+        raise SystemExit(L(en=f'"{name}" designates several tags of the library that differ only by their Unicode '
+                              f'form and display the same, {_forms(forms, a)}. Give the name in its exact form, '
+                              'copied from the inventory report or from Zotero.',
+                           fr=f'« {name} » désigne plusieurs tags de la bibliothèque qui ne diffèrent que par leur '
+                              f'forme Unicode et s\'affichent pareil, {_forms(forms, a)}. Donner le nom sous sa '
+                              'forme exacte, copiée depuis le rapport de l\'inventaire ou depuis Zotero.'))
+    return forms[0]
 
 
-# --- Analyse ----------------------------------------------------------------------
+# --- Analysis ----------------------------------------------------------------------
 
-class _Analyse:
-    """Usages et classements de la bibliothèque, partagés par l'inventaire, les règles et le plan."""
+class _Analysis:
+    """Usages and classifications of the library, shared by the inventory, the rules and the plan."""
 
-    def __init__(self, b: Bibliotheque, cfg: Config):
+    def __init__(self, b: Library, cfg: Config):
         self.b, self.cfg = b, cfg
-        m = cfg.methode
+        m = cfg.method
         self.u = usages(b, cfg)
-        self.masquees = filtre.cles_masquees(b, cfg)
-        self.par_identifiant = {identifiant(n): n for n, x in self.u.items() if x.confidentiel}
-        self.exclus = filtre.tags_exclus(cfg)
-        self.couleurs = {n for n, _ in b.couleurs}
-        self.etats = list(m.etats)
-        fonds_toml = cfg.suivi / f.FICHIER
-        self.lies = f.charger_suivi(cfg).tags if fonds_toml.is_file() else {}
-        chemin_plan = cfg.dossier_travail / f.PLAN
-        self.plan = f.lire_plan(chemin_plan.read_text(encoding='utf-8'), cfg) if chemin_plan.is_file() else None
-        self.rangement = r.charger(cfg) if (cfg.suivi / r.FICHIER).is_file() else []
-        self.attente = set()  # tags sur lesquels repose une proposition de rangement en attente (D156)
-        for x in self.rangement:
+        self.hidden = privacy.hidden_keys(b, cfg)
+        self.by_identifier = {identifier(n): n for n, x in self.u.items() if x.confidential}
+        self.excluded = privacy.excluded_tags(cfg)
+        self.colors = {n for n, _ in b.colors}
+        self.statuses = list(m.statuses)
+        subjects_toml = cfg.tracking / f.FILE
+        self.linked = f.load_tracking(cfg).tags if subjects_toml.is_file() else {}
+        plan_path = cfg.workspace / f.OUTLINE
+        self.plan = f.read_outline(plan_path.read_text(encoding='utf-8'), cfg) if plan_path.is_file() else None
+        self.filing = r.load(cfg) if (cfg.tracking / r.FILE).is_file() else []
+        self.waiting = set()  # tags on which a pending filing proposal rests (D156)
+        for x in self.filing:
             if x.decision == '' and x.source == r.TAG and (t := re.search(r'tag « (.+?) »', x.note)):
-                self.attente.add(t.group(1))
-        # Thèmes : collections sous la racine du fonds et chemins de plan.md, par forme du dernier nom.
-        e = r._Etat(b)
-        self.etat = e
-        racine = e.racine(m.fonds) if m.fonds else None
-        self.racine_fonds = racine
-        _, couvertes = f.collections_exclues(b, cfg)
-        cachees = {b.collections[c].cle for c in couvertes}
-        chemins = {e.chemin(k).split('/', 1)[1] for k in e.nom
-                   if racine and k != racine and e.sous(k, racine) and k not in cachees}
+                self.waiting.add(t.group(1))
+        # Themes: collections under the root of the fonds and paths of plan.md, by form of the last name.
+        e = r._State(b)
+        self.state = e
+        root = e.root(m.subjects) if m.subjects else None
+        self.subjects_root = root
+        _, covered = f.excluded_collections(b, cfg)
+        concealed_keys = {b.collections[c].key for c in covered}
+        paths = {e.path(k).split('/', 1)[1] for k in e.name
+                   if root and k != root and e.under(k, root) and k not in concealed_keys}
         if self.plan:
-            chemins |= set(self.plan.noeuds)
-        self.themes_par_forme = {forme(c.rsplit('/', 1)[-1], cfg): c for c in sorted(chemins, key=len, reverse=True)}
-        self.lot, self.importes = self._lots()
-        self.cumuls: dict[str, Usage] = {}  # cible d'un groupe de variantes -> usage réuni
-        self.forts = {n for n, u in self.u.items() if 0 in u.types and n not in self.importes}
-        self.concepts = {n for n in self.forts if self.est_concept(n)} | set(concepts_du_plan(cfg))
-        self.formes_reference = ({forme(n, cfg) for n in self.forts} | {forme(c, cfg) for c in self.concepts}
-                                 | set(self.themes_par_forme))
-        self.formes_concepts_themes = {forme(c, cfg) for c in self.concepts} | set(self.themes_par_forme)
-        self.etrangers = {}
-        for table, noms in ((ETATS_ETRANGERS, m.etats), (MARQUES_ETRANGERES, m.autres_tags)):
+            paths |= set(self.plan.nodes)
+        self.themes_by_form = {form(c.rsplit('/', 1)[-1], cfg): c for c in sorted(paths, key=len, reverse=True)}
+        self.batch, self.imported = self._batches()
+        self.combined_usages: dict[str, Usage] = {}  # target of a variants group -> combined usage
+        self.strong = {n for n, u in self.u.items() if 0 in u.types and n not in self.imported}
+        self.concepts = {n for n in self.strong if self.is_concept(n)} | set(outline_concepts(cfg))
+        self.reference_forms = ({form(n, cfg) for n in self.strong} | {form(c, cfg) for c in self.concepts}
+                                 | set(self.themes_by_form))
+        self.concept_theme_forms = {form(c, cfg) for c in self.concepts} | set(self.themes_by_form)
+        self.foreign_statuses = {}
+        for table, names in ((FOREIGN_STATUSES, m.statuses), (FOREIGN_MARKS, m.other_tags)):
             for i, alias in table.items():
-                if i < len(noms):
+                if i < len(names):
                     for a in alias:
-                        self.etrangers.setdefault(forme(a, cfg), noms[i])
+                        self.foreign_statuses.setdefault(form(a, cfg), names[i])
 
-    def reel(self, nom: str) -> str:
-        """Nom réel d'un tag désigné par son identifiant confidentiel, ou le nom tel quel."""
-        return self.par_identifiant.get(nom, nom)
+    def real(self, name: str) -> str:
+        """Real name of a tag designated by its confidential identifier, or the name as it is."""
+        return self.by_identifier.get(name, name)
 
-    def est_concept(self, nom: str) -> bool:
-        p = self.cfg.methode.prefixe_concept
-        return bool(p) and nom.startswith(p) and len(nom) > len(p)
+    def is_concept(self, name: str) -> bool:
+        p = self.cfg.method.concept_prefix
+        return bool(p) and name.startswith(p) and len(name) > len(p)
 
-    def protection(self, nom: str) -> str:
-        """Raison pour laquelle un tag est protégé (D151), vide sinon."""
-        m = self.cfg.methode
-        if filtre.forme(nom) in self.exclus:
-            return 'filtre de confidentialité, ne change jamais'
-        if m.prefixe_technique and nom.startswith(m.prefixe_technique):
-            return 'tag technique'
-        if nom in m.etats:
-            return 'état de la méthode'
-        if nom in m.autres_tags:
-            return 'marque de la méthode'
-        if nom in self.couleurs:
-            return 'tag coloré'
-        if nom in self.cfg.tags.proteges:
-            return 'liste [tags] proteges'
-        if nom in self.attente:
-            return 'proposition de rangement en attente'
+    def protection(self, name: str) -> str:
+        """Reason why a tag is protected (D151), empty otherwise."""
+        m = self.cfg.method
+        if privacy.form(name) in self.excluded:
+            return L(en='privacy filter, never changes', fr='filtre de confidentialité, ne change jamais')
+        if m.technical_prefix and name.startswith(m.technical_prefix):
+            return L(en='technical tag', fr='tag technique')
+        if name in m.statuses:
+            return L(en='status of the method', fr='état de la méthode')
+        if name in m.other_tags:
+            return L(en='mark of the method', fr='marque de la méthode')
+        if name in self.colors:
+            return L(en='colored tag', fr='tag coloré')
+        if name in self.cfg.tags.protected:
+            return L(en='list [tags] proteges', fr='liste [tags] proteges')
+        if name in self.waiting:
+            return L(en='filing proposal pending', fr='proposition de rangement en attente')
         return ''
 
-    def hors_familles(self, nom: str) -> bool:
-        return not self.est_concept(nom) and not self.protection(nom)
+    def outside_families(self, name: str) -> bool:
+        return not self.is_concept(name) and not self.protection(name)
 
-    def _lots(self) -> tuple[set[int], set[str]]:
-        """Fiches qui portent plus de `seuil_mots_cles` tags manuels hors familles, rares pour la plupart, et noms dont
-        toutes les occurrences manuelles sont sur ces fiches (D153). Les annotations n'y entrent jamais."""
+    def _batches(self) -> tuple[set[int], set[str]]:
+        """Items that carry more than `seuil_mots_cles` manual tags outside the families, mostly rare, and names whose
+        manual occurrences are all on those items (D153). Annotations never enter."""
         t = self.cfg.tags
-        lot = set()
-        for el in self.b.fiches:
-            if el.cle in self.masquees:
+        batch = set()
+        for el in self.b.items:
+            if el.key in self.hidden:
                 continue
-            hors = {n for n, typ in el.tags if typ == 0 and self.hors_familles(n)}
-            if len(hors) > t.seuil_mots_cles:
-                rares = sum(1 for n in hors if len(self.u[n].fiches) < t.seuil_candidat)
-                if 2 * rares > len(hors):
-                    lot.add(el.id)
-        importes = set()
+            outside = {n for n, typ in el.tags if typ == 0 and self.outside_families(n)}
+            if len(outside) > t.keywords_threshold:
+                rare = sum(1 for n in outside if len(self.u[n].items) < t.candidate_threshold)
+                if 2 * rare > len(outside):
+                    batch.add(el.id)
+        imported = set()
         for n, u in self.u.items():
-            if 0 not in u.types or u.confidentiel or not self.hors_familles(n):
+            if 0 not in u.types or u.confidential or not self.outside_families(n):
                 continue
-            manuels = {i for i in u.elements if (n, 0) in self.b.elements[i].tags}
-            if manuels and manuels <= lot:
-                importes.add(n)
-        return lot, importes
+            manual_tags = {i for i in u.all_items if (n, 0) in self.b.all_items[i].tags}
+            if manual_tags and manual_tags <= batch:
+                imported.add(n)
+        return batch, imported
 
-    def candidat(self, nom: str) -> bool:
-        """Exception proposée à la règle globale (D152) : assez porté, ou de même forme qu'un tag manuel, un concept
-        ou un thème."""
-        u = self.u[nom]
-        if len(u.fiches) >= self.cfg.tags.seuil_candidat:
+    def is_candidate(self, name: str) -> bool:
+        """Exception proposed to the global rule (D152): carried enough, or of the same form as a manual tag, a concept
+        or a theme."""
+        u = self.u[name]
+        if len(u.items) >= self.cfg.tags.candidate_threshold:
             return True
-        autres = {forme(n, self.cfg) for n in self.forts if n != nom} | self.formes_concepts_themes
-        return forme(nom, self.cfg) in autres
+        others = {form(n, self.cfg) for n in self.strong if n != name} | self.concept_theme_forms
+        return form(name, self.cfg) in others
 
-    def ressemble(self, nom: str) -> bool:
-        """Ressemblance avec un concept ou un thème, qui empêche de classer « évident » un tag à supprimer."""
-        fo = forme(nom, self.cfg)
-        for autre in self.formes_concepts_themes:
-            if fo == autre or fo in autre or autre in fo:
+    def resembles(self, name: str) -> bool:
+        """Resemblance to a concept or a theme, which prevents classing a tag to delete as « évident »."""
+        fo = form(name, self.cfg)
+        for other in self.concept_theme_forms:
+            if fo == other or fo in other or other in fo:
                 return True
-            s = SequenceMatcher(None, fo, autre)
+            s = SequenceMatcher(None, fo, other)
             if s.real_quick_ratio() >= 0.8 and s.quick_ratio() >= 0.8 and s.ratio() >= 0.8:
                 return True
         return False
 
-    # Variantes.
+    # Variants.
 
-    def groupes(self) -> tuple[list[Variantes], list[list[str]]]:
-        """Groupes de variantes proposés, et groupes laissés de côté parce qu'ils réunissent plusieurs tags protégés."""
-        par_forme: dict[str, list[str]] = defaultdict(list)
+    def groups(self) -> tuple[list[Variants], list[list[str]]]:
+        """Proposed variants groups, and groups set aside because they gather several protected tags."""
+        by_form: dict[str, list[str]] = defaultdict(list)
         for n, u in self.u.items():
-            if not u.confidentiel and filtre.forme(n) not in self.exclus:
-                par_forme[forme(n, self.cfg)].append(n)
-        res, ecartes = [], []
-        for fo, noms in sorted(par_forme.items()):
-            if len(noms) < 2:
+            if not u.confidential and privacy.form(n) not in self.excluded:
+                by_form[form(n, self.cfg)].append(n)
+        res, skipped = [], []
+        for fo, names in sorted(by_form.items()):
+            if len(names) < 2:
                 continue
-            noms.sort(key=lambda n: (-len(self.u[n].fiches), n))
-            fiches = set().union(*(self.u[n].fiches for n in noms))
-            if not (any(n in self.forts for n in noms) or len(fiches) >= self.cfg.tags.seuil_candidat
-                    or fo in self.formes_concepts_themes):
-                continue  # automatiques ou importés seulement, et rares : la règle globale s'en charge
-            proteges = [n for n in noms if self.protection(n)]
-            if len(proteges) > 1:
-                ecartes.append(noms)
+            names.sort(key=lambda n: (-len(self.u[n].items), n))
+            items = set().union(*(self.u[n].items for n in names))
+            if not (any(n in self.strong for n in names) or len(items) >= self.cfg.tags.candidate_threshold
+                    or fo in self.concept_theme_forms):
+                continue  # automatic or imported only, and rare: the global rule takes care of them
+            protected = [n for n in names if self.protection(n)]
+            if len(protected) > 1:
+                skipped.append(names)
                 continue
-            cible = proteges[0] if proteges else self._gagnante(noms)
-            evident = len({forme_faible(n, self.cfg) for n in noms}) == 1
-            res.append(Variantes(noms, cible, EVIDENT if evident else DOUTEUX,
-                                 note='' if evident else 'pluriel ou autre différence que la casse et les accents'))
-        return res, ecartes
+            target = protected[0] if protected else self._winner(names)
+            is_obvious = len({weak_form(n, self.cfg) for n in names}) == 1
+            res.append(Variants(names, target, OBVIOUS if is_obvious else DOUBTFUL,
+                                 note='' if is_obvious else L(en='plural or a difference other than case and accents',
+                                                              fr='pluriel ou autre différence que la casse et les accents')))
+        return res, skipped
 
-    def _gagnante(self, noms: list[str]) -> str:
-        """Le concept, puis le tag manuel le plus porté, puis la forme en minuscules accentuée (D156). Dès qu'un des
-        noms est écrit en minuscules, la cible l'est aussi, pour que les cibles suivent une même casse (« #Mémoire »
-        et « #memoire » donnent « #mémoire »). Les capitales ne restent que si tous les noms en portent (nom propre)."""
-        def poids(n):
-            return len(self.u[n].fiches), not n.isascii(), n == n.lower(), n
-        concepts = [n for n in noms if self.est_concept(n)]
-        forts = [n for n in noms if n in self.forts]
+    def _winner(self, names: list[str]) -> str:
+        """The concept, then the most carried manual tag, then the accented lowercase form (D156). As soon as one of the
+        names is written in lowercase, the target is too, so that targets follow one casing (« #Mémoire »
+        and « #memoire » give « #mémoire »). Capitals stay only if all the names have them (proper noun)."""
+        def weight(n):
+            return len(self.u[n].items), not n.isascii(), n == n.lower(), n
+        concepts = [n for n in names if self.is_concept(n)]
+        strong = [n for n in names if n in self.strong]
         if concepts:
-            gagnante = max(concepts, key=poids)
-        elif forts:
-            gagnante = max(forts, key=poids)
+            winner = max(concepts, key=weight)
+        elif strong:
+            winner = max(strong, key=weight)
         else:
-            return max(noms, key=lambda n: (not n.isascii(), len(self.u[n].fiches), n)).lower()
-        return gagnante.lower() if any(n == n.lower() for n in noms) else gagnante
+            return max(names, key=lambda n: (not n.isascii(), len(self.u[n].items), n)).lower()
+        return winner.lower() if any(n == n.lower() for n in names) else winner
 
-    # Entrées [[tag]].
+    # [[tag]] entries.
 
-    def cumul(self, noms: list[str]) -> Usage:
-        """Usage réuni des noms d'un groupe de variantes, porté par sa cible une fois le groupe fusionné."""
-        c = Usage(noms[-1])
-        for n in dict.fromkeys(noms):
+    def combined(self, names: list[str]) -> Usage:
+        """Combined usage of the names of a variants group, carried by its target once the group is merged."""
+        c = Usage(names[-1])
+        for n in dict.fromkeys(names):
             x = self.u.get(n)
             if x is None:
                 continue
             c.types |= x.types
             c.occurrences.update(x.occurrences)
-            c.elements |= x.elements
-            c.fiches |= x.fiches
-            c.enfants += x.enfants
+            c.all_items |= x.all_items
+            c.items |= x.items
+            c.children += x.children
             c.annotations += x.annotations
-            c.recherches += [rech for rech in x.recherches if rech not in c.recherches]
-        themes = themes_des_fiches(self.b, self.cfg) if c.fiches else {}
-        for fiche in c.fiches:
-            c.themes.update(themes.get(fiche, ()))
+            c.searches += [srch for srch in x.searches if srch not in c.searches]
+        themes = themes_of_items(self.b, self.cfg) if c.items else {}
+        for item in c.items:
+            c.themes.update(themes.get(item, ()))
         return c
 
-    def entrees(self, groupes: list[Variantes]) -> list[Entree]:
-        dans_groupes = {n for g in groupes for n in g.noms if n != g.cible}
-        self.cumuls = {g.cible: self.cumul([*g.noms, g.cible]) for g in groupes}
+    def entries(self, groups: list[Variants]) -> list[Entry]:
+        in_groups = {n for g in groups for n in g.names if n != g.target}
+        self.combined_usages = {g.target: self.combined([*g.names, g.target]) for g in groups}
         res = []
-        for n in sorted(set(self.u) | set(self.cumuls), key=norm):
-            u = self.cumuls.get(n) or self.u[n]
-            # Un tag protégé seulement par une proposition de rangement garde son entrée, qui attend ce rangement.
-            if u.confidentiel or n in dans_groupes or self.est_concept(n) or (self.protection(n) and n not in self.attente):
+        for n in sorted(set(self.u) | set(self.combined_usages), key=norm):
+            u = self.combined_usages.get(n) or self.u[n]
+            # A tag protected only by a filing proposal keeps its entry, which awaits that filing.
+            if u.confidential or n in in_groups or self.is_concept(n) or (self.protection(n) and n not in self.waiting):
                 continue
-            etat = self.etrangers.get(forme(n, self.cfg)) if 0 in u.types else None
-            if etat and etat != n:
-                e = self.stats(Entree(n), u)
-                e.sort, e.cible, e.note = ETAT, etat, 'état ou marque venu d\'une autre habitude, à confirmer'
+            state = self.foreign_statuses.get(form(n, self.cfg)) if 0 in u.types else None
+            if state and state != n:
+                e = self.stats(Entry(n), u)
+                e.action, e.target = STATUS, state
+                e.note = L(en='status or mark from another habit, to confirm',
+                           fr="état ou marque venu d'une autre habitude, à confirmer")
                 res.append(e)
                 continue
-            if n not in self.cumuls and (u.types == {1} or n in self.importes) and not self.candidat(n) \
-                    and not u.recherches:
-                continue  # retiré par la règle globale, sans examen
-            res.append(self.proposer(self.stats(Entree(n), u), u))
+            if n not in self.combined_usages and (u.types == {1} or n in self.imported) and not self.is_candidate(n) \
+                    and not u.searches:
+                continue  # removed by the global rule, without review
+            res.append(self.propose(self.stats(Entry(n), u), u))
         return res
 
-    def stats(self, e: Entree, u: Usage | None = None) -> Entree:
-        u = u or self.u.get(e.nom)
+    def stats(self, e: Entry, u: Usage | None = None) -> Entry:
+        u = u or self.u.get(e.name)
         if u is None:
-            e.effectif, e.dispersion, e.themes, e.recherches = 0, 0, [], []
+            e.count, e.dispersion, e.themes, e.searches = 0, 0, [], []
             return e
-        e.type = u.type_lisible + (', importé' if e.nom in self.importes else '')
-        e.effectif, e.dispersion = len(u.fiches), u.dispersion
+        e.type = u.readable_type + (', importé' if e.name in self.imported else '')
+        e.count, e.dispersion = len(u.items), u.dispersion
         e.themes = [t for t, _ in u.themes.most_common(3)]
-        e.recherches = list(u.recherches)
+        e.searches = list(u.searches)
         return e
 
-    def proposer(self, e: Entree, u: Usage | None = None) -> Entree:
-        n, u, cfg = e.nom, u or self.u[e.nom], self.cfg
-        theme_meme_nom = self.themes_par_forme.get(forme(n, cfg))
-        if n in self.lies:
-            e.sort, e.theme = SUPPRIMER, self.lies[n]
-            e.note = f'relié au thème « {e.theme} » dans suivi/fonds.toml, il le double'
-        elif theme_meme_nom:
-            e.sort, e.theme = SUPPRIMER, theme_meme_nom
-            e.note = f'même nom que le thème « {e.theme} », il le double'
-        elif _marque_technique(n, cfg):
-            e.sort, e.classe = SUPPRIMER, EVIDENT
-            e.note = "marque technique d'une application (« /unread », « _tablet »…), pas une notion"
-        elif len(u.elements) == 1 and 0 in u.types and not u.annotations and not u.recherches and not self.ressemble(n):
-            e.sort, e.classe, e.note = SUPPRIMER, EVIDENT, 'porté par une seule fiche, sans ressemblance avec un concept ou un thème'
-        elif u.dispersion >= cfg.tags.dispersion_concept:
-            e.sort, e.cible = CONCEPT, nom_de_concept(n, cfg)
-            e.note = (f'réparti sur {u.dispersion} thèmes du fonds, nom à vérifier (minuscules sauf nom propre, dans la '
-                      "langue de l'utilisateur) et définition à proposer")
-        elif u.dispersion == 1 and len(u.fiches) > 1:
-            e.sort, e.theme = SUPPRIMER, next(iter(u.themes))
-            e.note = f'concentré dans le thème « {e.theme} », il le double'
+    def propose(self, e: Entry, u: Usage | None = None) -> Entry:
+        n, u, cfg = e.name, u or self.u[e.name], self.cfg
+        theme_same_name = self.themes_by_form.get(form(n, cfg))
+        if n in self.linked:
+            e.action, e.theme = DELETE, self.linked[n]
+            e.note = L(en=f'linked to the theme "{e.theme}" in suivi/fonds.toml, it duplicates it',
+                       fr=f'relié au thème « {e.theme} » dans suivi/fonds.toml, il le double')
+        elif theme_same_name:
+            e.action, e.theme = DELETE, theme_same_name
+            e.note = L(en=f'same name as the theme "{e.theme}", it duplicates it',
+                       fr=f'même nom que le thème « {e.theme} », il le double')
+        elif _technical_mark(n, cfg):
+            e.action, e.grade = DELETE, OBVIOUS
+            e.note = L(en='technical mark of an application ("/unread", "_tablet"…), not a notion',
+                       fr="marque technique d'une application (« /unread », « _tablet »…), pas une notion")
+        elif len(u.all_items) == 1 and 0 in u.types and not u.annotations and not u.searches and not self.resembles(n):
+            e.action, e.grade = DELETE, OBVIOUS
+            e.note = L(en='carried by a single item, with no resemblance to a concept or a theme',
+                       fr='porté par une seule fiche, sans ressemblance avec un concept ou un thème')
+        elif u.dispersion >= cfg.tags.concept_dispersion:
+            e.action, e.target = CONCEPT, concept_name(n, cfg)
+            e.note = L(en=f'spread over {u.dispersion} themes of the subjects, name to check (lowercase except '
+                          "proper nouns, in the user's language) and definition to propose",
+                       fr=f'réparti sur {u.dispersion} thèmes du fonds, nom à vérifier (minuscules sauf nom propre, '
+                          "dans la langue de l'utilisateur) et définition à proposer")
+        elif u.dispersion == 1 and (filed := next(iter(u.themes.values()))) >= 2 and 2 * filed >= len(u.items):
+            # Concentrated: at least two items filed in the theme, and at least half of those that carry the tag
+            # (D241, a single filed item out of three made a mark look like a theme).
+            e.action, e.theme = DELETE, next(iter(u.themes))
+            e.note = L(en=f'concentrated in the theme "{e.theme}", it duplicates it',
+                       fr=f'concentré dans le thème « {e.theme} », il le double')
         elif u.types == {0, 1}:
-            e.sort, e.cible = FUSIONNER, n
-            e.note = 'porté aussi en manuel, ses occurrences automatiques deviendraient manuelles'
-        elif u.types == {1} or n in self.importes:
-            e.sort, e.note = SUPPRIMER, 'la règle globale le retirerait sans cette exception'
-        if u.recherches:
-            e.note = (e.note + '. ' if e.note else '') + 'cité par une recherche enregistrée'
-            e.classe = DOUTEUX
+            e.action, e.target = MERGE, n
+            e.note = L(en='also carried as manual, its automatic occurrences would become manual',
+                       fr='porté aussi en manuel, ses occurrences automatiques deviendraient manuelles')
+        elif u.types == {1} or n in self.imported:
+            e.action = DELETE
+            e.note = L(en='the global rule would remove it without this exception',
+                       fr='la règle globale le retirerait sans cette exception')
+        if u.searches:
+            e.note = (e.note + '. ' if e.note else '') + L(en='cited by a saved search',
+                                                          fr='cité par une recherche enregistrée')
+            e.grade = DOUBTFUL
         return e
 
-    def hors_du_theme(self, nom: str, theme: str, autres=()) -> set[int]:
-        """Fiches qui portent `nom` (ou l'un des `autres` noms qui lui sont ramenés) sans être encore dans `theme` ou
-        l'un de ses sous-thèmes."""
-        fiches = set()
-        for n in (nom, *autres):
-            if (u := self.cumuls.get(n) or self.u.get(n)) is not None:
-                fiches |= u.fiches
-        if self.racine_fonds is None:
-            return fiches
-        e = self.etat
+    def outside_theme(self, name: str, theme: str, others=()) -> set[int]:
+        """Items that carry `name` (or one of the `others` names brought back to it) without yet being in `theme` or
+        one of its subthemes."""
+        items = set()
+        for n in (name, *others):
+            if (u := self.combined_usages.get(n) or self.u.get(n)) is not None:
+                items |= u.items
+        if self.subjects_root is None:
+            return items
+        e = self.state
         res = set()
-        for i in fiches:
-            el = self.b.elements[i]
-            chemins = [e.chemin(e.cle[c]).split('/', 1)[1] for c in el.collections
-                       if e.cle[c] != self.racine_fonds and e.sous(e.cle[c], self.racine_fonds)]
-            if not any(c == theme or c.startswith(theme + '/') for c in chemins):
+        for i in items:
+            el = self.b.all_items[i]
+            paths = [e.path(e.key[c]).split('/', 1)[1] for c in el.collections
+                       if e.key[c] != self.subjects_root and e.under(e.key[c], self.subjects_root)]
+            if not any(c == theme or c.startswith(theme + '/') for c in paths):
                 res.add(i)
         return res
 
-    def propositions_rangement(self, s: Suivi) -> list[r.Entree]:
-        """Fiches d'un tag qui double un thème, absentes de ce thème, proposées au rangement (D154, D116)."""
-        if not self.plan or self.racine_fonds is None:
+    def filing_proposals(self, s: Tracking) -> list[r.Entry]:
+        """Items of a tag that duplicates a theme, absent from that theme, proposed for filing (D154, D116)."""
+        if not self.plan or self.subjects_root is None:
             return []
-        e = self.etat
-        deja = {x.cle for x in self.rangement}
-        inbox = e.racine(self.cfg.methode.inbox) if self.cfg.methode.inbox else None
+        e = self.state
+        already = {x.key for x in self.filing}
+        inbox = e.root(self.cfg.method.inbox) if self.cfg.method.inbox else None
         res = []
         for x in s.tags:
-            if x.sort != SUPPRIMER or not x.theme or x.decision == REFUSER or x.theme not in self.plan.noeuds:
+            if x.action != DELETE or not x.theme or x.decision == REJECT or x.theme not in self.plan.nodes:
                 continue
-            u = self.cumuls.get(x.nom) or self.u.get(x.nom)
-            if u is None or u.confidentiel:
+            u = self.combined_usages.get(x.name) or self.u.get(x.name)
+            if u is None or u.confidential:
                 continue
-            for i in sorted(u.fiches, key=lambda i: self.b.elements[i].cle):
-                el = self.b.elements[i]
-                if el.cle in deja or el.cle in self.masquees:
+            for i in sorted(u.items, key=lambda i: self.b.all_items[i].key):
+                el = self.b.all_items[i]
+                if el.key in already or el.key in self.hidden:
                     continue
-                chemins = [e.chemin(e.cle[c]).split('/', 1)[1] for c in el.collections
-                           if e.cle[c] != self.racine_fonds and e.sous(e.cle[c], self.racine_fonds)]
-                if any(c == x.theme or c.startswith(x.theme + '/') for c in chemins):
+                paths = [e.path(e.key[c]).split('/', 1)[1] for c in el.collections
+                           if e.key[c] != self.subjects_root and e.under(e.key[c], self.subjects_root)]
+                if any(c == x.theme or c.startswith(x.theme + '/') for c in paths):
                     continue
-                depuis = next((e.cle[c] for c in el.collections if inbox and e.sous(e.cle[c], inbox)), '')
-                res.append(r.Entree(el.cle, r.DEPLACER if depuis else r.AJOUTER, x.theme, depuis, r.TAG, '',
-                                    f'tag « {x.nom} »'))
-                deja.add(el.cle)
+                origin = next((e.key[c] for c in el.collections if inbox and e.under(e.key[c], inbox)), '')
+                res.append(r.Entry(el.key, r.MOVE if origin else r.ADD, x.theme, origin, r.TAG, '',
+                                    f'tag « {x.name} »'))
+                already.add(el.key)
         return res
 
 
-def mettre_a_jour(ancien: Suivi, detecte: Suivi, a: _Analyse) -> Suivi:
-    """Garde les décisions et les entrées de l'agent ou de l'utilisateur, renouvelle les propositions de zc encore en
-    attente, retire celles dont les tags ont disparu. Une règle décidée reste, pour le tri des références à venir."""
-    s = Suivi(ancien.automatiques, ancien.importes)
-    gardees = {e.nom: e for e in ancien.tags if e.decision or e.source != ZC}
-    vus = set()
-    for e in ancien.tags:
-        if e.nom in gardees and e.nom not in vus:
-            nom = a.reel(e.nom)
-            ref = a.stats(Entree(nom), a.cumuls.get(nom))
+def bring_up_to_date(old: Tracking, detected: Tracking, a: _Analysis) -> Tracking:
+    """Keeps the decisions and entries of the agent or the user, renews zc proposals still
+    pending, removes those whose tags have vanished. A decided rule stays, for the triage of future references."""
+    s = Tracking(old.automatic, old.imported)
+    kept = {e.name: e for e in old.tags if e.decision or e.source != ZC}
+    seen_set = set()
+    for e in old.tags:
+        if e.name in kept and e.name not in seen_set:
+            name = a.real(e.name)
+            ref = a.stats(Entry(name), a.combined_usages.get(name))
             e.type = ref.type or e.type
-            e.effectif, e.dispersion, e.themes, e.recherches = ref.effectif, ref.dispersion, ref.themes, ref.recherches
+            e.count, e.dispersion, e.themes, e.searches = ref.count, ref.dispersion, ref.themes, ref.searches
             s.tags.append(e)
-            vus.add(e.nom)
-    s.tags += [e for e in detecte.tags if e.nom not in gardees]
-    s.tags.sort(key=lambda e: norm(e.nom))
+            seen_set.add(e.name)
+    s.tags += [e for e in detected.tags if e.name not in kept]
+    s.tags.sort(key=lambda e: norm(e.name))
 
-    figes = [g for g in ancien.variantes if g.decision or g.source != ZC]
-    s.variantes = list(figes)
-    for d in detecte.variantes:
-        couverts = set()
-        cible = d.cible
-        for g in figes:
-            membres = set(g.noms) | {g.cible}
-            if membres & set(d.noms):
-                couverts |= membres
-                cible = g.cible
-        reste = [n for n in d.noms if n not in couverts]
-        if not reste:
+    settled = [g for g in old.variants if g.decision or g.source != ZC]
+    s.variants = list(settled)
+    for d in detected.variants:
+        covered_names = set()
+        target = d.target
+        for g in settled:
+            members = set(g.names) | {g.target}
+            if members & set(d.names):
+                covered_names |= members
+                target = g.target
+        rest = [n for n in d.names if n not in covered_names]
+        if not rest:
             continue
-        if couverts:
-            d = Variantes([*reste, *([cible] if cible in a.u and cible not in reste else [])], cible, d.classe,
-                          note='nouveaux noms pour une forme déjà jugée')
-        s.variantes.append(d)
+        if covered_names:
+            d = Variants([*rest, *([target] if target in a.u and target not in rest else [])], target, d.grade,
+                          note=L(en='new names for a form already judged', fr='nouveaux noms pour une forme déjà jugée'))
+        s.variants.append(d)
     return s
 
 
-def fondre(s: Suivi) -> list[Variantes]:
-    """Réunit dans l'entrée [[tag]] de sa cible un groupe de variantes proposé par zc vers un nom que zc propose de
-    supprimer, pour ne pas proposer à la fois de ramener des noms à un tag et de supprimer ce tag. Les noms du groupe
-    passent dans `variantes` de l'entrée, supprimés avec elle. Rend les groupes retirés."""
-    par_nom = {e.nom: e for e in s.tags}
-    couverts = {v for e in s.tags for v in e.variantes}
-    gardes, fondus = [], []
-    for g in s.variantes:
+def fold(s: Tracking) -> list[Variants]:
+    """Merges into the [[tag]] entry of its target a variants group proposed by zc toward a name that zc proposes to
+    delete, so as not to propose both bringing names back to a tag and deleting that tag. The names of the group
+    go into `variants` of the entry, deleted with it. Returns the removed groups."""
+    by_name = {e.name: e for e in s.tags}
+    covered_names = {v for e in s.tags for v in e.variants}
+    keepers, folded = [], []
+    for g in s.variants:
         if g.source != ZC or g.decision:
-            gardes.append(g)
+            keepers.append(g)
             continue
-        autres = [n for n in g.noms if n != g.cible and n not in couverts]
-        e = par_nom.get(g.cible)
-        if not autres:
-            fondus.append(g)  # déjà réunis dans une entrée [[tag]]
-        elif e is not None and e.sort == SUPPRIMER and not e.decision and e.source == ZC:
-            e.variantes += [n for n in autres if n not in e.variantes]
-            couverts |= set(autres)
-            fondus.append(g)
+        others = [n for n in g.names if n != g.target and n not in covered_names]
+        e = by_name.get(g.target)
+        if not others:
+            folded.append(g)  # already merged into a [[tag]] entry
+        elif e is not None and e.action == DELETE and not e.decision and e.source == ZC:
+            e.variants += [n for n in others if n not in e.variants]
+            covered_names |= set(others)
+            folded.append(g)
         else:
-            if e is not None and e.sort == SUPPRIMER and e.decision == ACCEPTER:
-                g.note = (g.note + '. ' if g.note else '') + (f'« {g.cible} » est déjà supprimé par une règle acceptée, '
-                                                              'accepter ce groupe supprime aussi ces noms')
-            gardes.append(g)
-    s.variantes = gardes
-    return fondus
+            if e is not None and e.action == DELETE and e.decision == ACCEPT:
+                g.note = (g.note + '. ' if g.note else '') + L(
+                    en=f'"{g.target}" is already deleted by an accepted rule, accepting this group deletes these '
+                       'names too',
+                    fr=f'« {g.target} » est déjà supprimé par une règle acceptée, accepter ce groupe supprime aussi '
+                       'ces noms')
+            keepers.append(g)
+    s.variants = keepers
+    return folded
 
 
-# --- Inventaire -------------------------------------------------------------------
+# --- Inventory -------------------------------------------------------------------
 
-def inventaire(b: Bibliotheque, cfg: Config, jour: date | None = None) -> tuple[str, Suivi]:
-    """Rapport d'inventaire et suivi mis à jour (à écrire par `ecrire`), lecture seule."""
-    a = _Analyse(b, cfg)
-    groupes, ecartes = a.groupes()
-    detecte = Suivi(tags=a.entrees(groupes), variantes=groupes)
-    suivi = mettre_a_jour(charger(cfg), detecte, a)
-    fondus = fondre(suivi)
-    suivi.a_ranger = a.propositions_rangement(suivi)
-    a.attente |= {x.note[len('tag « '):-len(' »')] for x in suivi.a_ranger}
+def inventory(b: Library, cfg: Config, day: date | None = None) -> tuple[str, Tracking]:
+    """Inventory report and updated tracking (to be written by `write`), read-only."""
+    a = _Analysis(b, cfg)
+    groups, skipped = a.groups()
+    detected = Tracking(tags=a.entries(groups), variants=groups)
+    tracking = bring_up_to_date(load(cfg), detected, a)
+    folded = fold(tracking)
+    tracking.pending = a.filing_proposals(tracking)
+    a.waiting |= {x.note[len('tag « '):-len(' »')] for x in tracking.pending}
 
-    # Ce que les règles globales retireraient, une fois acceptées, avec les exceptions en attente.
-    simule = _regles(a, suivi, simuler=True)
-    retires: dict[str, Counter] = {'automatique': Counter(), 'importé': Counter()}
-    for el in b.elements.values():
-        for nom, sorte in _viser(el.tags, el.type == 'annotation', simule, el.id).retires:
-            if sorte in retires:
-                retires[sorte][nom] += 1
+    # What the global rules would remove, once accepted, with the pending exceptions.
+    simulated = _rules(a, tracking, simulate=True)
+    removed: dict[str, Counter] = {'automatique': Counter(), 'importé': Counter()}
+    for el in b.all_items.values():
+        for name, kind in _compute_target(el.tags, el.type == 'annotation', simulated, el.id).removed:
+            if kind in removed:
+                removed[kind][name] += 1
     autos = {n: u for n, u in a.u.items() if 1 in u.types}
-    occ_autos = sum(u.occurrences[1] for u in autos.values())
-    suivi.resume_automatiques = (
-        f"{pluriel(len(autos), 'nom')} automatique(s), {occ_autos} occurrence(s). La règle en retire "
-        f"{len(retires['automatique'])} nom(s) et {sum(retires['automatique'].values())} occurrence(s), les "
-        'exceptions sont dans les [[tag]] et [[variantes]] en attente.')
-    if a.lot:
-        suivi.resume_importes = (
-            f"{pluriel(len(a.lot), 'fiche')} porte(nt) plus de {cfg.tags.seuil_mots_cles} tags manuels hors familles, "
-            f"rares pour la plupart (mots-clés importés). {len(retires['importé'])} nom(s) et "
-            f"{sum(retires['importé'].values())} occurrence(s) retirés si la règle est acceptée.")
-    groupes = [g for g in groupes if not any(g is x for x in fondus)]
-    return _rapport_inventaire(a, suivi, groupes, ecartes, retires, jour or date.today(), len(fondus)), suivi
+    auto_occurrences = sum(u.occurrences[1] for u in autos.values())
+    names_count = plural(len(autos), en='automatic name', fr='nom')
+    removed_names, removed_occurrences = len(removed['automatique']), sum(removed['automatique'].values())
+    tracking.automatic_summary = L(
+        en=f"{names_count}, {auto_occurrences} occurrence(s). The rule removes {removed_names} name(s) and "
+           f"{removed_occurrences} occurrence(s), the exceptions are in the pending [[tag]] and [[variantes]].",
+        fr=f"{names_count} automatique(s), {auto_occurrences} occurrence(s). La règle en retire "
+           f"{removed_names} nom(s) et {removed_occurrences} occurrence(s), les "
+           'exceptions sont dans les [[tag]] et [[variantes]] en attente.')
+    if a.batch:
+        items_count = plural(len(a.batch), en='item', fr='fiche')
+        imported_names, imported_occurrences = len(removed['importé']), sum(removed['importé'].values())
+        tracking.imported_summary = L(
+            en=f"{items_count} with more than {cfg.tags.keywords_threshold} manual tags outside the families, "
+               f"mostly rare (imported keywords). {imported_names} name(s) and {imported_occurrences} "
+               "occurrence(s) removed if the rule is accepted.",
+            fr=f"{items_count} porte(nt) plus de {cfg.tags.keywords_threshold} tags manuels hors familles, "
+               f"rares pour la plupart (mots-clés importés). {imported_names} nom(s) et "
+               f"{imported_occurrences} occurrence(s) retirés si la règle est acceptée.")
+    groups = [g for g in groups if not any(g is x for x in folded)]
+    return _inventory_report(a, tracking, groups, skipped, removed, day or date.today(), len(folded)), tracking
 
 
-def _rapport_inventaire(a: _Analyse, s: Suivi, groupes: list[Variantes], ecartes: list[list[str]],
-                        retires: dict[str, Counter], jour: date, fondus: int = 0) -> str:
+def _inventory_report(a: _Analysis, s: Tracking, groups: list[Variants], skipped: list[list[str]],
+                        removed: dict[str, Counter], day: date, folded: int = 0) -> str:
     b, cfg, u = a.b, a.cfg, a.u
-    publics = {n: x for n, x in u.items() if not x.confidentiel}
+    public = {n: x for n, x in u.items() if not x.confidential}
     occurrences = sum(sum(x.occurrences.values()) for x in u.values())
-    manuels = sum(1 for x in u.values() if 0 in x.types)
+    manual_tags = sum(1 for x in u.values() if 0 in x.types)
     autos = sum(1 for x in u.values() if 1 in x.types)
-    L = [f'# Inventaire des tags, {jour:%d/%m/%Y}', '',
-         "Lecture seule, rien n'a été modifié. Les règles à juger sont dans `suivi/tags.toml`, qui garde les décisions "
-         "d'une fois sur l'autre. `zc tags planifier` applique les règles acceptées.", '',
-         f"{pluriel(len(u), 'nom')} de tags, {occurrences} occurrence(s) sur les fiches, pièces jointes, notes et "
-         f"annotations (corbeille exclue). {manuels} nom(s) posé(s) en manuel, {autos} en automatique "
-         '(mots-clés des éditeurs, ajoutés par Zotero).']
+    names = plural(len(u), en='tag name', fr='nom')
+    lines = [L(en=f'# Tag inventory, {day:%d/%m/%Y}', fr=f'# Inventaire des tags, {day:%d/%m/%Y}'), '',
+             L(en="Read-only, nothing was changed. The rules to judge are in `suivi/tags.toml`, which keeps the "
+                  "decisions from one run to the next. `zc tags plan` applies the accepted rules.",
+               fr="Lecture seule, rien n'a été modifié. Les règles à juger sont dans `suivi/tags.toml`, qui garde les "
+                  "décisions d'une fois sur l'autre. `zc tags plan` applique les règles acceptées."), '',
+             L(en=f"{names}, {occurrences} occurrence(s) on items, attachments, notes and annotations (trash "
+                  f"excluded). {manual_tags} name(s) set as manual, {autos} as automatic (publishers' keywords, "
+                  "added by Zotero).",
+               fr=f"{names}, {occurrences} occurrence(s) sur les fiches, pièces jointes, notes et "
+                  f"annotations (corbeille exclue). {manual_tags} nom(s) posé(s) en manuel, {autos} en automatique "
+                  '(mots-clés des éditeurs, ajoutés par Zotero).')]
 
-    L += ['', '## Règle globale des tags automatiques', '', s.resume_automatiques,
-          f"Décision actuelle : « {s.automatiques or 'à prendre'} ». Une seule approbation suffit. Les exceptions sont "
-          f"les tags automatiques portés par au moins {cfg.tags.seuil_candidat} fiches ou de même forme qu'un tag "
-          'manuel, un concept ou un thème. Les tags protégés et ceux cités par une recherche enregistrée y échappent.']
-    if retires['automatique']:
-        L += ['', 'Les plus portés parmi les noms retirés : ' + ', '.join(
-            f'{_affiche(a, n)} ({k})' for n, k in retires['automatique'].most_common(15)) + '.']
+    current = s.automatic or L(en='to be taken', fr='à prendre')
+    lines += ['', L(en='## Global rule on automatic tags', fr='## Règle globale des tags automatiques'), '',
+              s.automatic_summary,
+              L(en=f'Current decision: "{current}". A single approval is enough. The exceptions are the automatic '
+                   f'tags carried by at least {cfg.tags.candidate_threshold} items or of the same form as a manual '
+                   'tag, a concept or a theme. Protected tags and those cited by a saved search escape it.',
+                fr=f"Décision actuelle : « {current} ». Une seule approbation suffit. Les exceptions sont "
+                   f"les tags automatiques portés par au moins {cfg.tags.candidate_threshold} fiches ou de même "
+                   "forme qu'un tag manuel, un concept ou un thème. Les tags protégés et ceux cités par une "
+                   'recherche enregistrée y échappent.')]
+    if removed['automatique']:
+        most = ', '.join(f'{_displayed(a, n)} ({k})' for n, k in removed['automatique'].most_common(15))
+        lines += ['', L(en=f'The most carried among the removed names: {most}.',
+                        fr=f'Les plus portés parmi les noms retirés : {most}.')]
 
-    if a.lot:
-        L += ['', '## Mots-clés importés en tags manuels', '', s.resume_importes,
-              f"Décision actuelle : « {s.importes or 'à prendre'} ». Exemples de fiches :", '']
-        for i in sorted(a.lot, key=lambda i: norm(b.elements[i].titre))[:10]:
-            el = b.elements[i]
-            hors = [n for n, t in el.tags if t == 0 and n in a.importes]
-            L.append(f'- {el.cle} · {_ligne(el)} · {len(hors)} tags, dont ' + ', '.join(hors[:6]))
+    if a.batch:
+        current = s.imported or L(en='to be taken', fr='à prendre')
+        lines += ['', L(en='## Keywords imported as manual tags', fr='## Mots-clés importés en tags manuels'), '',
+                  s.imported_summary,
+                  L(en=f'Current decision: "{current}". Examples of items:',
+                    fr=f'Décision actuelle : « {current} ». Exemples de fiches :'), '']
+        for i in sorted(a.batch, key=lambda i: norm(b.all_items[i].title))[:10]:
+            el = b.all_items[i]
+            outside = [n for n, t in el.tags if t == 0 and n in a.imported]
+            some = ', '.join(outside[:6])
+            lines.append(L(en=f'- {el.key} · {_line(el)} · {len(outside)} tags, including {some}',
+                           fr=f'- {el.key} · {_line(el)} · {len(outside)} tags, dont {some}'))
 
-    evidents = [g for g in groupes if g.classe == EVIDENT]
-    L += ['', '## Variantes', '',
-          f"{pluriel(len(groupes), 'groupe')} de noms de même forme, dont {len(evidents)} évident(s) (casse, accents, "
-          "espaces, tirets ou préfixe seulement, à approuver en bloc) et les autres douteux (pluriel, par paquets de "
-          "10). La cible suit la règle fixe (concept, puis tag manuel le plus porté, puis forme en minuscules "
-          "accentuée). Les traductions ne sont pas repérées, l'agent peut en proposer.", '']
-    L += [f"- {g.classe} : {' / '.join(_affiche(a, n) for n in g.noms)} → {g.cible}" for g in groupes]
-    if fondus:
-        L += ['', f"{pluriel(fondus, 'autre groupe')} réuni(s) à l'entrée `[[tag]]` de sa cible, que zc propose de "
-                  "supprimer (champ `variantes`). Accepter l'entrée supprime aussi ces noms, la garder les y ramène."]
-    if ecartes:
-        L += ['', 'Groupes qui réunissent plusieurs tags protégés, laissés de côté (à régler dans Zotero, '
-                  '« Renommer le tag… ») :', '']
-        L += [f"- {' / '.join(n)}" for n in ecartes]
+    obvious = [g for g in groups if g.grade == OBVIOUS]
+    groups_count = plural(len(groups), en='group', fr='groupe')
+    lines += ['', L(en='## Variants', fr='## Variantes'), '',
+              L(en=f"{groups_count} of names of the same form, {len(obvious)} of them obvious (case, accents, "
+                   "spaces, hyphens or prefix only, to approve in bulk) and the others doubtful (plural, by "
+                   "bundles of 10). The target follows the fixed rule (concept, then the most carried manual tag, "
+                   "then the accented lowercase form). Translations are not detected, the agent can propose some.",
+                fr=f"{groups_count} de noms de même forme, dont {len(obvious)} évident(s) (casse, accents, "
+                   "espaces, tirets ou préfixe seulement, à approuver en bloc) et les autres douteux (pluriel, par "
+                   "paquets de 10). La cible suit la règle fixe (concept, puis tag manuel le plus porté, puis forme "
+                   "en minuscules accentuée). Les traductions ne sont pas repérées, l'agent peut en proposer."), '']
+    lines += [L(en=f"- {grade_shown(g.grade)}: {' / '.join(_displayed(a, n) for n in g.names)} → {g.target}",
+                fr=f"- {grade_shown(g.grade)} : {' / '.join(_displayed(a, n) for n in g.names)} → {g.target}")
+              for g in groups]
+    if folded:
+        others_count = plural(folded, en='other group', fr='autre groupe')
+        lines += ['', L(en=f"{others_count} gathered into the `[[tag]]` entry of their target, which zc proposes to "
+                           "delete (`variantes` field). Accepting the entry deletes these names too, keeping it "
+                           "brings them back to it.",
+                        fr=f"{others_count} réuni(s) à l'entrée `[[tag]]` de sa cible, que zc propose de "
+                           "supprimer (champ `variantes`). Accepter l'entrée supprime aussi ces noms, la garder les y "
+                           "ramène.")]
+    if skipped:
+        lines += ['', L(en='Groups that gather several protected tags, left aside (to settle in Zotero, '
+                           '"Rename Tag…"):',
+                        fr='Groupes qui réunissent plusieurs tags protégés, laissés de côté (à régler dans Zotero, '
+                           '« Renommer le tag… ») :'), '']
+        lines += [f"- {' / '.join(n)}" for n in skipped]
 
-    def section(titre: str, texte: str, entrees: list[Entree]):
-        if entrees:
-            L.extend(['', f'## {titre}', '', texte, ''])
-            L.extend(_ligne_entree(e) for e in entrees)
+    def section(title: str, text: str, entries: list[Entry]):
+        if entries:
+            lines.extend(['', f'## {title}', '', text, ''])
+            lines.extend(_entry_line(e) for e in entries)
 
-    attente = [e for e in s.tags if not e.decision]
-    section('États et marques venus d\'autres habitudes', 'Rapprochés des états et marques de la méthode par un petit '
-            'dictionnaire. Rien d\'office. Une fiche qui recevrait deux états garde le plus avancé.',
-            [e for e in attente if e.sort == ETAT])
-    section('Concepts proposés', f'Tags répartis sur au moins {cfg.tags.dispersion_concept} thèmes du fonds. '
-            "L'agent propose le nom (`cible`) et une définition courte pour la section `# Concepts` de plan.md.",
-            [e for e in attente if e.sort == CONCEPT])
-    section('Tags qui doublent un thème', 'Proposés à la suppression. Les fiches qui portent le tag sans être '
-            'dans le thème sont d\'abord proposées dans `suivi/rangement.toml` (source « tag »), et le tag reste '
-            'en place tant que ces propositions attendent.', [e for e in attente if e.sort == SUPPRIMER and e.theme])
-    if s.a_ranger:
-        L += ['', f"{pluriel(len(s.a_ranger), 'proposition')} de rangement ajoutée(s) à `suivi/rangement.toml`."]
-    uniques = [e for e in attente if e.sort == SUPPRIMER and e.classe == EVIDENT]
-    section('Tags portés par une seule fiche', 'Sans ressemblance avec un concept ou un thème, évidents à supprimer, '
-            'à approuver en bloc (liste complète).', uniques)
-    autres = [e for e in attente if e not in uniques and e.sort not in (ETAT, CONCEPT)
-              and not (e.sort == SUPPRIMER and e.theme)]
-    section('Autres tags à juger', 'Tags manuels hors familles et exceptions à la règle globale, par paquets de 20 avec '
-            'leur effectif, leur dispersion et trois titres (dans `suivi/tags.toml`). Sorts possibles : supprimer, '
-            'garder, concept, fusionner. Garder est légitime.', autres)
-    decidees = [e for e in s.tags if e.decision]
-    if decidees:
-        L += ['', '## Règles déjà décidées', '',
-              f"{pluriel(len(decidees), 'entrée')} jugée(s), dont {sum(e.decision == ACCEPTER for e in decidees)} "
-              'acceptée(s). Elles restent dans le fichier et servent au tri des références à venir.']
+    waiting = [e for e in s.tags if not e.decision]
+    section(L(en='Statuses and marks from other habits', fr="États et marques venus d'autres habitudes"),
+            L(en='Matched to the statuses and marks of the method by a small dictionary. Nothing is done '
+                 'automatically. An item that would receive two statuses keeps the most advanced.',
+              fr="Rapprochés des états et marques de la méthode par un petit dictionnaire. Rien d'office. Une fiche "
+                 'qui recevrait deux états garde le plus avancé.'),
+            [e for e in waiting if e.action == STATUS])
+    section(L(en='Proposed concepts', fr='Concepts proposés'),
+            L(en=f'Tags spread over at least {cfg.tags.concept_dispersion} themes of the subjects. The agent '
+                 'proposes the name (`cible`) and a short definition for the `# Concepts` section of plan.md.',
+              fr=f'Tags répartis sur au moins {cfg.tags.concept_dispersion} thèmes du fonds. '
+                 "L'agent propose le nom (`cible`) et une définition courte pour la section `# Concepts` de plan.md."),
+            [e for e in waiting if e.action == CONCEPT])
+    section(L(en='Tags that duplicate a theme', fr='Tags qui doublent un thème'),
+            L(en='Proposed for deletion. The items that carry the tag without being in the theme are first proposed '
+                 'in `suivi/rangement.toml` (source "tag"), and the tag stays in place while these proposals wait.',
+              fr="Proposés à la suppression. Les fiches qui portent le tag sans être dans le thème sont d'abord "
+                 'proposées dans `suivi/rangement.toml` (source « tag »), et le tag reste en place tant que ces '
+                 'propositions attendent.'),
+            [e for e in waiting if e.action == DELETE and e.theme])
+    if s.pending:
+        proposals = plural(len(s.pending), en='filing proposal', fr='proposition de rangement')
+        lines += ['', L(en=f'{proposals} added to `suivi/rangement.toml`.',
+                        fr=f'{proposals} ajoutée(s) à `suivi/rangement.toml`.')]
+    unique = [e for e in waiting if e.action == DELETE and e.grade == OBVIOUS]
+    section(L(en='Tags carried by a single item', fr='Tags portés par une seule fiche'),
+            L(en='With no resemblance to a concept or a theme, obvious to delete, to approve in bulk (complete list).',
+              fr='Sans ressemblance avec un concept ou un thème, évidents à supprimer, à approuver en bloc (liste '
+                 'complète).'), unique)
+    others = [e for e in waiting if e not in unique and e.action not in (STATUS, CONCEPT)
+              and not (e.action == DELETE and e.theme)]
+    section(L(en='Other tags to judge', fr='Autres tags à juger'),
+            L(en='Manual tags outside the families and exceptions to the global rule, by bundles of 20 with their '
+                 'count, their dispersion and three titles (in `suivi/tags.toml`). Possible fates, given with '
+                 '`zc tags add --action`: delete, keep, concept, merge (written « supprimer », « garder », « concept », '
+                 '« fusionner » in the file). Keeping is legitimate.',
+              fr='Tags manuels hors familles et exceptions à la règle globale, par paquets de 20 avec leur effectif, '
+                 'leur dispersion et trois titres (dans `suivi/tags.toml`). Sorts possibles : supprimer, garder, '
+                 'concept, fusionner. Garder est légitime.'), others)
+    decided = [e for e in s.tags if e.decision]
+    if decided:
+        entries_count = plural(len(decided), en='entry', fr='entrée', en_plural='entries')
+        accepted = sum(e.decision == ACCEPT for e in decided)
+        lines += ['', L(en='## Rules already decided', fr='## Règles déjà décidées'), '',
+                  L(en=f'{entries_count} judged, {accepted} of them accepted. They stay in the file and serve to '
+                       'sort future items.',
+                    fr=f"{entries_count} jugée(s), dont {accepted} acceptée(s). Elles restent dans le fichier et "
+                       'servent au tri des références à venir.')]
 
-    proteges = sorted(((n, a.protection(n)) for n in publics if a.protection(n)), key=lambda x: norm(x[0]))
-    L += ['', '## Tags protégés', '',
-          'Inventoriés sans proposition. Ils ne changent que par une entrée de source « utilisateur ». Pour renommer '
-          'un tag coloré, passer par « Renommer le tag… » dans Zotero, qui reporte la couleur.', '']
-    L += [f'- {n} ({raison}, {len(u[n].fiches)} fiche(s))' for n, raison in proteges] or ['- aucun']
-    L += ['', f"Tags colorés : {len(b.couleurs)} sur {MAX_COULEURS}, {MAX_COULEURS - len(b.couleurs)} place(s) libre(s)."]
-    for rang, (n, couleur) in enumerate(b.couleurs, 1):
-        L.append(f'- {rang}. {_affiche(a, n)} ({couleur})' + ('' if n in u else ', porté par aucun élément'))
+    protected = sorted(((n, a.protection(n)) for n in public if a.protection(n)), key=lambda x: norm(x[0]))
+    lines += ['', L(en='## Protected tags', fr='## Tags protégés'), '',
+              L(en='Inventoried without proposal. They only change through an entry whose source is "utilisateur". To '
+                   'rename a colored tag, use "Rename Tag…" in Zotero, which carries the color over.',
+                fr='Inventoriés sans proposition. Ils ne changent que par une entrée de source « utilisateur ». Pour '
+                   'renommer un tag coloré, passer par « Renommer le tag… » dans Zotero, qui reporte la couleur.'), '']
+    lines += [L(en=f'- {n} ({reason}, {len(u[n].items)} item(s))', fr=f'- {n} ({reason}, {len(u[n].items)} fiche(s))')
+              for n, reason in protected] or [L(en='- none', fr='- aucun')]
+    lines += ['', L(en=f'Colored tags: {len(b.colors)} of {MAX_COLORS}, {MAX_COLORS - len(b.colors)} slot(s) free.',
+                    fr=f'Tags colorés : {len(b.colors)} sur {MAX_COLORS}, {MAX_COLORS - len(b.colors)} place(s) '
+                       'libre(s).')]
+    for rank, (n, color) in enumerate(b.colors, 1):
+        lines.append(f'- {rank}. {_displayed(a, n)} ({color})'
+                     + ('' if n in u else L(en=', carried by no element', fr=', porté par aucun élément')))
 
-    cites = [(rech, op, val) for rech, op, val in b.recherches_tags]
-    if cites:
-        L += ['', '## Recherches enregistrées qui citent un tag', '',
-              "Un tag cité échappe aux règles globales, et n'est supprimé ou renommé que par une entrée acceptée. Le "
-              'rapport du plan rappelle alors de mettre la recherche à jour dans Zotero.', '']
-        for rech, op, val in cites:
-            noms = [_affiche(a, n) for n, x in u.items() if rech in x.recherches]
-            L.append(f'- « {rech} » : tag {op} « {_affiche(a, val) if val in u else val} »'
-                     + (f" ({', '.join(noms)})" if noms else ', aucun tag porté ne correspond'))
+    citing = [(srch, op, val) for srch, op, val in b.tag_searches]
+    if citing:
+        lines += ['', L(en='## Saved searches that cite a tag', fr='## Recherches enregistrées qui citent un tag'), '',
+                  L(en="A cited tag escapes the global rules, and is only deleted or renamed by an accepted entry. "
+                       "The plan report then reminds you to update the search in Zotero.",
+                    fr="Un tag cité échappe aux règles globales, et n'est supprimé ou renommé que par une entrée "
+                       'acceptée. Le rapport du plan rappelle alors de mettre la recherche à jour dans Zotero.'), '']
+        for srch, op, val in citing:
+            names = [_displayed(a, n) for n, x in u.items() if srch in x.searches]
+            shown_value = _displayed(a, val) if val in u else val
+            matches = (f" ({', '.join(names)})" if names
+                       else L(en=', no carried tag matches', fr=', aucun tag porté ne correspond'))
+            lines.append(L(en=f'- "{srch}": tag {op} "{shown_value}"{matches}',
+                           fr=f'- « {srch} » : tag {op} « {shown_value} »{matches}'))
 
-    confidentiels = sorted((n for n, x in u.items() if x.confidentiel), key=identifiant)
-    if confidentiels:
-        L += ['', '## Tags de fiches confidentielles', '',
-              'Portés seulement par des fiches exclues par le filtre, ils apparaissent sous un identifiant. Seules les '
-              'règles globales s\'y appliquent, le reste par une entrée de source « utilisateur » nommée par '
-              "l'identifiant.", '']
-        L += [f'- {identifiant(n)} ({u[n].type_lisible}, {len(u[n].elements)} élément(s))' for n in confidentiels]
+    confidential_tags = sorted((n for n, x in u.items() if x.confidential), key=identifier)
+    if confidential_tags:
+        lines += ['', L(en='## Tags of confidential items', fr='## Tags de fiches confidentielles'), '',
+                  L(en='Carried only by items excluded by the filter, they appear under an identifier. Only the '
+                       'global rules apply to them, the rest through an entry whose source is "utilisateur" named by '
+                       'the identifier.',
+                    fr="Portés seulement par des fiches exclues par le filtre, ils apparaissent sous un identifiant. "
+                       "Seules les règles globales s'y appliquent, le reste par une entrée de source « utilisateur » "
+                       "nommée par l'identifiant."), '']
+        lines += [L(en=f'- {identifier(n)} ({type_shown(u[n].readable_type)}, {len(u[n].all_items)} element(s))',
+                    fr=f'- {identifier(n)} ({type_shown(u[n].readable_type)}, {len(u[n].all_items)} élément(s))')
+                  for n in confidential_tags]
 
-    enfants = sorted(n for n, x in publics.items() if x.enfants == len(x.elements))
-    if enfants:
-        L += ['', '## Tags portés seulement par des pièces jointes, notes ou annotations', '',
-              'Les mêmes règles s\'y appliquent. Les tags d\'annotations, posés à la main dans le lecteur, ne comptent '
-              'jamais parmi les mots-clés importés.', '']
-        L += [f'- {n} ({len(u[n].elements)} élément(s), dont {u[n].annotations} annotation(s))' for n in enfants]
-    return '\n'.join(L) + '\n'
+    children = sorted(n for n, x in public.items() if x.children == len(x.all_items))
+    if children:
+        lines += ['', L(en='## Tags carried only by attachments, notes or annotations',
+                        fr='## Tags portés seulement par des pièces jointes, notes ou annotations'), '',
+                  L(en='The same rules apply to them. Annotation tags, set by hand in the reader, never count among '
+                       'the imported keywords.',
+                    fr="Les mêmes règles s'y appliquent. Les tags d'annotations, posés à la main dans le lecteur, ne "
+                       'comptent jamais parmi les mots-clés importés.'), '']
+        lines += [L(en=f'- {n} ({len(u[n].all_items)} element(s), {u[n].annotations} of them annotation(s))',
+                    fr=f'- {n} ({len(u[n].all_items)} élément(s), dont {u[n].annotations} annotation(s))')
+                  for n in children]
+    return '\n'.join(lines) + '\n'
 
 
-def _ligne(el: Element) -> str:
-    return f'{el.auteur or "?"}, {annee(el) or "s. d."}, {el.titre[:80] or "(sans titre)"}'
+def _line(el: Item) -> str:
+    return (f'{el.author or "?"}, {year(el) or L(en="n.d.", fr="s. d.")}, '
+            f'{el.title[:80] or L(en="(untitled)", fr="(sans titre)")}')
 
 
-def _ligne_entree(e: Entree) -> str:
-    morceaux = [f'{e.type}', f'{e.effectif} fiche(s)', f'dispersion {e.dispersion}']
+def _entry_line(e: Entry) -> str:
+    chunks = [type_shown(e.type), L(en=f'{e.count} item(s)', fr=f'{e.count} fiche(s)'),
+              L(en=f'dispersion {e.dispersion}', fr=f'dispersion {e.dispersion}')]
     if e.themes:
-        morceaux.append('thèmes ' + ', '.join(e.themes))
-    propose = e.sort + (f' → {e.cible}' if e.cible else '') + (f' (double {e.theme})' if e.theme else '')
-    if e.variantes:
-        propose += f", avec ses variantes {', '.join(e.variantes)}"
-    return f"- {e.nom} ({', '.join(morceaux)})" + (f' : {propose}' if e.sort else ' : sort à proposer') + \
-        (f'. {e.note}' if e.note else '')
+        chunks.append(L(en=f"themes {', '.join(e.themes)}", fr=f"thèmes {', '.join(e.themes)}"))
+    proposed = action_shown(e.action) + (f' → {e.target}' if e.target else '') \
+        + (L(en=f' (duplicates {e.theme})', fr=f' (double {e.theme})') if e.theme else '')
+    if e.variants:
+        proposed += L(en=f", with its variants {', '.join(e.variants)}", fr=f", avec ses variantes {', '.join(e.variants)}")
+    return f"- {e.name} ({', '.join(chunks)})" \
+        + (L(en=f': {proposed}', fr=f' : {proposed}') if e.action else L(en=': fate to propose', fr=' : sort à proposer')) \
+        + (f'. {e.note}' if e.note else '')
 
 
-def _affiche(a: _Analyse, nom: str) -> str:
-    return identifiant(nom) if nom in a.u and a.u[nom].confidentiel else nom
+def _displayed(a: _Analysis, name: str) -> str:
+    return identifier(name) if name in a.u and a.u[name].confidential else name
 
 
-# --- Règles -----------------------------------------------------------------------
+# --- Rules -----------------------------------------------------------------------
 
 @dataclass
-class Regles:
-    automatiques: bool = False
-    importes: set[str] = field(default_factory=set)
-    exclus: set[str] = field(default_factory=set)
-    proteges: set[str] = field(default_factory=set)
-    exemptes: set[str] = field(default_factory=set)  # échappent aux règles globales
-    renommer: dict[str, tuple[str, str]] = field(default_factory=dict)  # nom -> (cible, sorte)
-    supprimer: set[str] = field(default_factory=set)
-    etats: list[str] = field(default_factory=list)
-    confidentiels: set[str] = field(default_factory=set)
-    cites: dict[str, list[str]] = field(default_factory=dict)  # tag -> recherches enregistrées qui le citent
-    # Tag qui double un thème -> fiches pas encore dans ce thème, où il reste jusqu'au rangement (D154).
-    garder_sur: dict[str, set[int]] = field(default_factory=dict)
-    fiche_de: dict[int, int] = field(default_factory=dict)  # élément -> sa fiche
-    problemes: list[str] = field(default_factory=list)
+class Rules:
+    automatic: bool = False
+    imported: set[str] = field(default_factory=set)
+    excluded: set[str] = field(default_factory=set)
+    protected: set[str] = field(default_factory=set)
+    exempt: set[str] = field(default_factory=set)  # escape the global rules
+    rename: dict[str, tuple[str, str]] = field(default_factory=dict)  # name -> (target, kind)
+    delete: set[str] = field(default_factory=set)
+    statuses: list[str] = field(default_factory=list)
+    confidential_tags: set[str] = field(default_factory=set)
+    citing: dict[str, list[str]] = field(default_factory=dict)  # tag -> saved searches that cite it
+    # Tag that duplicates a theme -> items not yet in that theme, where it stays until filing (D154).
+    keep_on: dict[str, set[int]] = field(default_factory=dict)
+    item_of: dict[int, int] = field(default_factory=dict)  # element -> its item
+    problems: list[str] = field(default_factory=list)
 
-    def suivre(self, nom: str) -> tuple[str, set[str]]:
-        """Cible finale d'un renommage, en suivant les chaînes (variante, puis concept), et sortes rencontrées."""
-        sortes, vus = set(), {nom}
-        while nom in self.renommer:
-            cible, sorte = self.renommer[nom]
-            sortes.add(sorte)
-            if cible in vus or cible == nom:
-                return cible, sortes
-            vus.add(cible)
-            nom = cible
-        return nom, sortes
-
-
-def regles(suivi: Suivi, cfg: Config, b: Bibliotheque) -> Regles:
-    """Règles acceptées de `suivi/tags.toml`. La bibliothèque sert à reconnaître les tags protégés (colorés, en
-    attente d'un rangement), cités par une recherche ou confidentiels, et les mots-clés importés."""
-    return _regles(_Analyse(b, cfg), suivi)
+    def track(self, name: str) -> tuple[str, set[str]]:
+        """Final target of a renaming, following the chains (variant, then concept), and the kinds met on the way."""
+        kinds, seen_set = set(), {name}
+        while name in self.rename:
+            target, kind = self.rename[name]
+            kinds.add(kind)
+            if target in seen_set or target == name:
+                return target, kinds
+            seen_set.add(target)
+            name = target
+        return name, kinds
 
 
-def _regles(a: _Analyse, s: Suivi, simuler: bool = False) -> Regles:
-    R = Regles(automatiques=simuler or s.automatiques == ACCEPTER, exclus=set(a.exclus), etats=list(a.etats))
-    R.fiche_de = {el.id: f for el in a.b.elements.values() if (f := fiche_de(a.b, el)) is not None}
-    if simuler or s.importes == ACCEPTER:
-        R.importes = set(a.importes)
-    R.proteges = {n for n in a.u if a.protection(n)} | set(a.cfg.tags.proteges) | set(a.cfg.methode.etats) \
-        | set(a.cfg.methode.autres_tags) | a.couleurs | a.attente
-    R.confidentiels = {n for n, x in a.u.items() if x.confidentiel}
-    R.cites = {n: x.recherches for n, x in a.u.items() if x.recherches}
-    R.exemptes = set(R.cites)
+def rules(tracking: Tracking, cfg: Config, b: Library) -> Rules:
+    """Accepted rules of `suivi/tags.toml`. The library serves to recognise protected tags (colored, awaiting
+    filing), tags cited by a search or confidential, and imported keywords."""
+    return _rules(_Analysis(b, cfg), tracking)
 
-    def autorise(nom: str, source: str) -> bool:
-        if nom in a.attente:
-            R.problemes.append(f'« {_affiche(a, nom)} » attend le jugement de propositions de rangement qui reposent '
-                               'sur lui (suivi/rangement.toml). Règle appliquée une fois ces propositions jugées.')
+
+def _rules(a: _Analysis, s: Tracking, simulate: bool = False) -> Rules:
+    R = Rules(automatic=simulate or s.automatic == ACCEPT, excluded=set(a.excluded), statuses=list(a.statuses))
+    R.item_of = {el.id: f for el in a.b.all_items.values() if (f := item_of(a.b, el)) is not None}
+    if simulate or s.imported == ACCEPT:
+        R.imported = set(a.imported)
+    R.protected = {n for n in a.u if a.protection(n)} | set(a.cfg.tags.protected) | set(a.cfg.method.statuses) \
+        | set(a.cfg.method.other_tags) | a.colors | a.waiting
+    R.confidential_tags = {n for n, x in a.u.items() if x.confidential}
+    R.citing = {n: x.searches for n, x in a.u.items() if x.searches}
+    R.exempt = set(R.citing)
+
+    def is_allowed(name: str, source: str) -> bool:
+        if name in a.waiting:
+            shown = _displayed(a, name)
+            R.problems.append(L(en=f'"{shown}" awaits the judgment of filing proposals that rest on it '
+                                   '(suivi/rangement.toml). Rule applied once these proposals are judged.',
+                                fr=f'« {shown} » attend le jugement de propositions de rangement qui reposent '
+                                   'sur lui (suivi/rangement.toml). Règle appliquée une fois ces propositions jugées.'))
             return False
-        if nom in R.exclus:
-            R.problemes.append(f'« {_affiche(a, nom)} » sert au filtre de confidentialité, il ne change jamais.')
+        if name in R.excluded:
+            shown = _displayed(a, name)
+            R.problems.append(L(en=f'"{shown}" is used by the privacy filter, it never changes.',
+                                fr=f'« {shown} » sert au filtre de confidentialité, il ne change jamais.'))
             return False
-        if (nom in R.proteges or nom in R.confidentiels) and source != UTILISATEUR:
-            quoi = 'protégé' if nom in R.proteges else 'porté seulement par des fiches confidentielles'
-            R.problemes.append(f'« {_affiche(a, nom)} » est {quoi}, seule une entrée de source « utilisateur » le '
-                               'change. Règle ignorée.')
+        if (name in R.protected or name in R.confidential_tags) and source != USER:
+            what = (L(en='protected', fr='protégé') if name in R.protected
+                    else L(en='carried only by confidential items', fr='porté seulement par des fiches confidentielles'))
+            shown = _displayed(a, name)
+            R.problems.append(L(en=f'"{shown}" is {what}, only an entry whose source is "utilisateur" changes it. '
+                                   'Rule ignored.',
+                                fr=f'« {shown} » est {what}, seule une entrée de source « utilisateur » le '
+                                   'change. Règle ignorée.'))
             return False
         return True
 
-    for g in s.variantes:
-        noms = [a.reel(n) for n in g.noms]
+    for g in s.variants:
+        names = [a.real(n) for n in g.names]
         if g.decision == '':
-            R.exemptes |= set(noms)
-        elif g.decision == ACCEPTER:
-            for n in noms:
-                if autorise(n, g.source):
-                    R.renommer[n] = (g.cible, 'variante')
-            R.exemptes.add(g.cible)
+            R.exempt |= set(names)
+        elif g.decision == ACCEPT:
+            for n in names:
+                if is_allowed(n, g.source):
+                    R.rename[n] = (g.target, 'variante')
+            R.exempt.add(g.target)
     for e in s.tags:
-        n = a.reel(e.nom)
-        variantes = [a.reel(v) for v in e.variantes]
+        n = a.real(e.name)
+        variants = [a.real(v) for v in e.variants]
         if e.decision == '':
-            R.exemptes |= {n, *variantes}
+            R.exempt |= {n, *variants}
             continue
-        if e.decision == REFUSER:
+        if e.decision == REJECT:
             continue
-        if not autorise(n, e.source):
-            R.exemptes |= {n, *variantes}
+        if not is_allowed(n, e.source):
+            R.exempt |= {n, *variants}
             continue
-        for v in variantes:  # ramenées au nom de l'entrée, puis soumises à son sort
-            if v != n and autorise(v, e.source):
-                R.renommer[v] = (n, 'variante')
-        if e.sort == SUPPRIMER:
-            R.supprimer.add(n)
-            ramenes = [v for v, (c, _) in R.renommer.items() if c == n]
-            if e.theme and (hors := a.hors_du_theme(n, e.theme, ramenes)):
-                R.garder_sur[n] = hors
-                R.problemes.append(f'« {_affiche(a, n)} » double le thème « {e.theme} », mais '
-                                   f'{pluriel(len(hors), "fiche")} qui le {"portent" if len(hors) > 1 else "porte"} '
-                                   f"n'{'y sont' if len(hors) > 1 else 'y est'} pas encore. Il y reste jusqu'à "
-                                   f"{'leur' if len(hors) > 1 else 'son'} rangement.")
-        elif e.sort == GARDER:
-            R.exemptes.add(n)
-        elif e.sort in SORTE_DU_SORT:
-            R.renommer[n] = (e.cible, SORTE_DU_SORT[e.sort])
+        for v in variants:  # brought back to the entry name, then subjected to its fate
+            if v != n and is_allowed(v, e.source):
+                R.rename[v] = (n, 'variante')
+        if e.action == DELETE:
+            R.delete.add(n)
+            folded = [v for v, (c, _) in R.rename.items() if c == n]
+            if e.theme and (outside := a.outside_theme(n, e.theme, folded)):
+                R.keep_on[n] = outside
+                shown = _displayed(a, n)
+                count = plural(len(outside), en='item', fr='fiche')
+                R.problems.append(
+                    L(en=f'"{shown}" duplicates the theme "{e.theme}", but {count} that carry it are not in it yet. '
+                         'It stays there until they are filed.',
+                      fr=f'« {shown} » double le thème « {e.theme} », mais {count} qui le portent n\'y sont pas '
+                         'encore. Il y reste jusqu\'à leur rangement.')
+                    if len(outside) > 1 else
+                    L(en=f'"{shown}" duplicates the theme "{e.theme}", but {count} that carries it is not in it yet. '
+                         'It stays there until it is filed.',
+                      fr=f'« {shown} » double le thème « {e.theme} », mais {count} qui le porte n\'y est pas encore. '
+                         'Il y reste jusqu\'à son rangement.'))
+        elif e.action == KEEP:
+            R.exempt.add(n)
+        elif e.action in KIND_OF_ACTION:
+            R.rename[n] = (e.target, KIND_OF_ACTION[e.action])
         else:
-            R.problemes.append(f'« {_affiche(a, n)} » est accepté sans sort. Règle ignorée.')
-            R.exemptes.add(n)
+            shown = _displayed(a, n)
+            R.problems.append(L(en=f'"{shown}" is accepted without a sort. Rule ignored.',
+                                fr=f'« {shown} » est accepté sans sort. Règle ignorée.'))
+            R.exempt.add(n)
     return R
 
 
 @dataclass
-class Vise:
+class Target:
     tags: list[dict]
-    sortes: set[str] = field(default_factory=set)
-    retires: list[tuple[str, str]] = field(default_factory=list)  # (nom, sorte)
-    renommes: list[tuple[str, str, str]] = field(default_factory=list)  # (nom, cible, sorte)
+    kinds: set[str] = field(default_factory=set)
+    removed: list[tuple[str, str]] = field(default_factory=list)  # (name, kind)
+    renamed: list[tuple[str, str, str]] = field(default_factory=list)  # (name, target, kind)
 
 
-def _viser(tags: list[tuple[str, int]], annotation: bool, R: Regles, element: int | None = None) -> Vise:
-    """`element` (identifiant) sert à garder un tag qui double un thème sur une fiche pas encore rangée (D154)."""
+def _compute_target(tags: list[tuple[str, int]], annotation: bool, R: Rules, item_id: int | None = None) -> Target:
+    """`item_id` (identifier) serves to keep a tag that duplicates a theme on an item not yet filed (D154)."""
     res: dict[str, int] = {}
-    fiche = R.fiche_de.get(element) if element is not None else None
+    item = R.item_of.get(item_id) if item_id is not None else None
 
-    def supprime(nom: str) -> bool:
-        return nom in R.supprimer and fiche not in R.garder_sur.get(nom, ())
+    def is_deleted(name: str) -> bool:
+        return name in R.delete and item not in R.keep_on.get(name, ())
 
-    v = Vise([])
-    etat_ajoute = False
+    v = Target([])
+    status_added = False
 
-    def poser(nom: str, typ: int):
-        res[nom] = min(res.get(nom, typ), typ)
+    def put(name: str, typ: int):
+        res[name] = min(res.get(name, typ), typ)
 
-    for nom, typ in tags:
-        if nom in R.exclus:
-            poser(nom, typ)
+    for name, typ in tags:
+        if name in R.excluded:
+            put(name, typ)
             continue
-        if nom in R.renommer:
-            cible, sortes = R.suivre(nom)
-            if supprime(cible):
-                v.retires.append((nom, 'suppression'))
-                v.sortes.add('suppression')
+        if name in R.rename:
+            target, kinds = R.track(name)
+            if is_deleted(target):
+                v.removed.append((name, 'suppression'))
+                v.kinds.add('suppression')
                 continue
-            poser(cible, 0)
-            if (cible, 0) != (nom, typ):
-                sorte = sorted(sortes)[0] if len(sortes) == 1 else ('variante' if 'variante' in sortes else
-                                                                    sorted(sortes)[0])
-                v.renommes.append((nom, cible, sorte))
-                v.sortes |= sortes
-                etat_ajoute |= cible in R.etats and cible != nom
+            put(target, 0)
+            if (target, 0) != (name, typ):
+                kind = sorted(kinds)[0] if len(kinds) == 1 else ('variante' if 'variante' in kinds else
+                                                                    sorted(kinds)[0])
+                v.renamed.append((name, target, kind))
+                v.kinds |= kinds
+                status_added |= target in R.statuses and target != name
             continue
-        if supprime(nom):
-            v.retires.append((nom, 'suppression'))
-            v.sortes.add('suppression')
+        if is_deleted(name):
+            v.removed.append((name, 'suppression'))
+            v.kinds.add('suppression')
             continue
-        libre = nom not in R.proteges and nom not in R.exemptes
-        if libre and typ == 1 and R.automatiques:
-            v.retires.append((nom, 'automatique'))
-            v.sortes.add('automatique')
+        free = name not in R.protected and name not in R.exempt
+        if free and typ == 1 and R.automatic:
+            v.removed.append((name, 'automatique'))
+            v.kinds.add('automatique')
             continue
-        if libre and typ == 0 and nom in R.importes and not annotation:
-            v.retires.append((nom, 'importé'))
-            v.sortes.add('importé')
+        if free and typ == 0 and name in R.imported and not annotation:
+            v.removed.append((name, 'importé'))
+            v.kinds.add('importé')
             continue
-        poser(nom, typ)
-    if etat_ajoute:
-        presents = [e for e in R.etats if e in res]
-        for e in presents[:-1]:  # l'état le plus avancé l'emporte (D156)
+        put(name, typ)
+    if status_added:
+        present_statuses = [e for e in R.statuses if e in res]
+        for e in present_statuses[:-1]:  # the most advanced status wins (D156)
             del res[e]
-            v.retires.append((e, 'état'))
-            v.sortes.add('état')
+            v.removed.append((e, 'état'))
+            v.kinds.add('état')
     v.tags = [{'tag': n} if t == 0 else {'tag': n, 'type': 1} for n, t in res.items()]
     return v
 
 
-def tags_vises(element: Element, R: Regles) -> list[dict]:
-    """Liste complète des tags d'un élément après les règles, au format de l'API (`{"tag": …}` pour un tag manuel,
-    `{"tag": …, "type": 1}` pour un automatique conservé), sans doublon. Fonction pure, reprise par le tri."""
-    return _viser(element.tags, element.type == 'annotation', R, element.id).tags
+def targeted_tags(item: Item, R: Rules) -> list[dict]:
+    """Complete list of the tags of an element after the rules, in API format (`{"tag": …}` for a manual tag,
+    `{"tag": …, "type": 1}` for a kept automatic one), without duplicates. Pure function, reused by the triage."""
+    return _compute_target(item.tags, item.type == 'annotation', R, item.id).tags
 
 
-def a_signaler(element: Element, R: Regles, cfg: Config) -> list[str]:
-    """Tags manuels hors familles d'un élément qu'aucune règle ne couvre, à soumettre à l'utilisateur (D155)."""
-    m = cfg.methode
-    connus = R.proteges | R.exemptes | set(R.renommer) | R.supprimer | R.importes | R.exclus
-    return [n for n, t in element.tags if t == 0 and n not in connus
-            and not (m.prefixe_concept and n.startswith(m.prefixe_concept))
-            and not (m.prefixe_technique and n.startswith(m.prefixe_technique))]
+def to_flag(item: Item, R: Rules, cfg: Config) -> list[str]:
+    """Manual tags outside the families of an element that no rule covers, to submit to the user (D155)."""
+    m = cfg.method
+    known = R.protected | R.exempt | set(R.rename) | R.delete | R.imported | R.excluded
+    return [n for n, t in item.tags if t == 0 and n not in known
+            and not (m.concept_prefix and n.startswith(m.concept_prefix))
+            and not (m.technical_prefix and n.startswith(m.technical_prefix))]
 
 
 # --- Plan -------------------------------------------------------------------------
@@ -1348,189 +1612,236 @@ def _tags_api(data: dict) -> list[tuple[str, int]]:
     return [(t['tag'], int(t.get('type', 0))) for t in data.get('tags') or []]
 
 
-def planifier(b: Bibliotheque, cfg: Config, client: Client, jour: date | None = None) -> tuple[Plan, str]:
-    """Plan d'une opération par élément dont les tags changent, d'après les règles acceptées (D156)."""
-    if (serveur := client.version_serveur()) > b.version:
-        raise SystemExit(f'Zotero n\'a pas encore reçu les derniers changements de la bibliothèque (version locale '
-                         f'{b.version}, version du serveur {serveur}). Vérifier que Zotero est ouvert et synchronise, '
-                         'puis relancer.')
-    a = _Analyse(b, cfg)
-    suivi = charger(cfg)
-    R = _regles(a, suivi)
+def make_plan(b: Library, cfg: Config, client: Client, day: date | None = None) -> tuple[Plan, str]:
+    """Plan with one operation per element whose tags change, according to the accepted rules (D156)."""
+    if (server := client.server_version()) > b.version:
+        raise SystemExit(L(en=f'Zotero has not received the latest changes of the library yet (local version '
+                              f'{b.version}, server version {server}). Check that Zotero is open and syncing, then '
+                              'run the command again.',
+                           fr=f'Zotero n\'a pas encore reçu les derniers changements de la bibliothèque (version '
+                              f'locale {b.version}, version du serveur {server}). Vérifier que Zotero est ouvert et '
+                              'synchronise, puis relancer.'))
+    a = _Analysis(b, cfg)
+    tracking = load(cfg)
+    R = _rules(a, tracking)
 
-    def actuels(tags):
-        return normaliser('tags', [{'tag': n, 'type': t} for n, t in tags])
+    def current(tags):
+        return normalize('tags', [{'tag': n, 'type': t} for n, t in tags])
 
-    candidats = [el for el in b.elements.values()
-                 if normaliser('tags', _viser(el.tags, el.type == 'annotation', R, el.id).tags) != actuels(el.tags)]
-    api = client.fiches([el.cle for el in candidats])
-    retenus: list[tuple[Element, Operation, Vise]] = []
-    for el in candidats:
-        d = api.get(el.cle)
+    candidates = [el for el in b.all_items.values()
+                 if normalize('tags', _compute_target(el.tags, el.type == 'annotation', R, el.id).tags) != current(el.tags)]
+    api = client.items([el.key for el in candidates])
+    retained: list[tuple[Item, Operation, Target]] = []
+    for el in candidates:
+        d = api.get(el.key)
         if d is None:
-            R.problemes.append(f'L\'élément {el.cle} n\'existe plus dans Zotero, laissé de côté.')
+            R.problems.append(L(en=f'The element {el.key} no longer exists in Zotero, left aside.',
+                                fr=f'L\'élément {el.key} n\'existe plus dans Zotero, laissé de côté.'))
             continue
-        avant = list(d.get('tags') or [])
-        v = _viser(_tags_api(d), el.type == 'annotation', R, el.id)
-        if normaliser('tags', v.tags) == normaliser('tags', avant):
+        before = list(d.get('tags') or [])
+        v = _compute_target(_tags_api(d), el.type == 'annotation', R, el.id)
+        if normalize('tags', v.tags) == normalize('tags', before):
             continue
-        op = Operation(el.cle, {'tags': avant}, {'tags': v.tags}, nature=', '.join(s for s in SORTES if s in v.sortes))
-        retenus.append((el, op, v))
+        op = Operation(el.key, {'tags': before}, {'tags': v.tags}, nature=', '.join(s for s in kinds() if s in v.kinds))
+        retained.append((el, op, v))
 
-    couleurs = _couleurs(cfg, client.reglages([COULEURS])[COULEURS]['value'])
-    essai = cfg.ecriture.essai - bool(couleurs)
-    retenus = _ordonner(retenus, essai, a.masquees)
-    groupes = [Groupe(el.cle, _titre(b, el, a.masquees), [op]) for el, op, _ in retenus]
-    if couleurs:  # premier groupe, donc dans l'essai
-        groupes.insert(0, Groupe(COULEURS, 'couleurs des tags de la méthode', [couleurs]))
-    plan = Plan(ETAPE, client.utilisateur, groupes, description=f"Tags, {pluriel(len(retenus), 'élément')}"
-                + (', et couleurs des tags de la méthode.' if couleurs else '.'))
-    return plan, _rapport_plan(a, R, retenus, essai, jour or date.today(), couleurs)
+    colors = _colors(cfg, client.settings([COLORS])[COLORS]['value'])
+    trial = cfg.writing.trial - bool(colors)
+    retained = _order(retained, trial, a.hidden)
+    groups = [Group(el.key, _title(b, el, a.hidden), [op]) for el, op, _ in retained]
+    if colors:  # first group, hence in the trial
+        groups.insert(0, Group(COLORS, L(en='colors of the method tags', fr='couleurs des tags de la méthode'),
+                               [colors]))
+    elements = plural(len(retained), en='element', fr='élément')
+    plan = Plan(STEP, client.user, groups,
+                description=L(en=f'Tags, {elements}', fr=f'Tags, {elements}')
+                + (L(en=', and colors of the method tags.', fr=', et couleurs des tags de la méthode.')
+                   if colors else '.'))
+    return plan, _plan_report(a, R, retained, trial, day or date.today(), colors)
 
 
-COULEURS = 'tagColors'
+COLORS = 'tagColors'
 
 
-def _couleurs(cfg: Config, actuelles) -> Operation | None:
-    """Tags de la méthode colorés et placés en tête, dans l'ordre des états puis des autres tags, pour recevoir les
-    touches 1, 2, 3… (D175). Un tag de la méthode déjà coloré garde sa couleur. Les autres tags colorés gardent la
-    leur et suivent. Colorés même encore inutilisés, pour être visibles et à portée de touche dès le départ."""
-    m = cfg.methode
-    actuelles = [c for c in actuelles or [] if isinstance(c, dict) and c.get('name')]
-    deja = {c['name']: c for c in actuelles}
-    methode = [{'name': n, 'color': deja[n]['color'] if n in deja else couleur}
-               for n, couleur in zip([*m.etats, *m.autres_tags], m.couleurs)]
-    noms = {c['name'] for c in methode}
-    voulues = methode + [c for c in actuelles if c['name'] not in noms]
-    if voulues == actuelles or not methode:
+def _colors(cfg: Config, current) -> Operation | None:
+    """Tags of the method colored and placed first, in the order of statuses then of the other tags, to receive the
+    keys 1, 2, 3… (D175). A method tag already colored keeps its color. The other colored tags keep
+    theirs and follow. Colored even if still unused, to be visible and within reach of a key from the start."""
+    m = cfg.method
+    current = [c for c in current or [] if isinstance(c, dict) and c.get('name')]
+    already = {c['name']: c for c in current}
+    method = [{'name': n, 'color': already[n]['color'] if n in already else color}
+               for n, color in zip([*m.statuses, *m.other_tags], m.colors)]
+    names = {c['name'] for c in method}
+    wanted = method + [c for c in current if c['name'] not in names]
+    if wanted == current or not method:
         return None
-    return Operation(COULEURS, {'value': actuelles or None}, {'value': voulues},
-                     nature='couleurs des tags de la méthode', genre='settings')
+    return Operation(COLORS, {'value': current or None}, {'value': wanted},
+                     nature=L(en='colors of the method tags', fr='couleurs des tags de la méthode'), kind='settings')
 
 
-def _ordonner(retenus: list, essai: int, masquees: set[str]) -> list:
-    """Les premiers groupes, appliqués par l'essai, couvrent chaque sorte de changement présente (D156)."""
-    def cle(x):
+def _order(retained: list, trial: int, hidden: set[str]) -> list:
+    """The first groups, applied by the trial, cover each kind of change present (D156)."""
+    def key(x):
         el = x[0]
-        return norm(el.titre), el.cle
+        return norm(el.title), el.key
 
-    restants = sorted(retenus, key=cle)
-    reste = set().union(*(x[2].sortes for x in restants)) if restants else set()
-    premiers = []
-    while reste and len(premiers) < essai:
-        # Le plus de sortes encore absentes, une fiche visible plutôt qu'un enfant ou une fiche confidentielle,
-        # puis l'ordre des titres.
-        _, x = max(enumerate(restants), key=lambda ix: (len(ix[1][2].sortes & reste), ix[1][0].est_fiche,
-                                                         ix[1][0].cle not in masquees, -ix[0]))
-        premiers.append(x)
-        restants.remove(x)
-        reste -= x[2].sortes
-    return premiers + restants
-
-
-def _titre(b: Bibliotheque, el: Element, masquees: set[str]) -> str:
-    if el.cle in masquees:
-        return filtre.MASQUE
-    if el.est_fiche:
-        return _ligne(el)
-    fiche = fiche_de(b, el)
-    quoi = {'attachment': 'pièce jointe', 'note': 'note', 'annotation': 'annotation'}.get(el.type, el.type)
-    if fiche is None:
-        return f'{quoi} isolée'
-    return f'{quoi} de « {b.elements[fiche].titre[:60] or "sans titre"} »'
+    remaining = sorted(retained, key=key)
+    rest = set().union(*(x[2].kinds for x in remaining)) if remaining else set()
+    first_groups = []
+    while rest and len(first_groups) < trial:
+        # Most kinds still absent, a visible item rather than a child or a confidential item,
+        # then the order of titles.
+        _, x = max(enumerate(remaining), key=lambda ix: (len(ix[1][2].kinds & rest), ix[1][0].is_item,
+                                                         ix[1][0].key not in hidden, -ix[0]))
+        first_groups.append(x)
+        remaining.remove(x)
+        rest -= x[2].kinds
+    return first_groups + remaining
 
 
-def _liste(tags: list, a: _Analyse) -> str:
-    return ', '.join(f"{_affiche(a, t['tag'])}{' (auto)' if t.get('type') == 1 else ''}" for t in tags) or 'aucun'
+def _title(b: Library, el: Item, hidden: set[str]) -> str:
+    if el.key in hidden:
+        return privacy.mask()
+    if el.is_item:
+        return _line(el)
+    item = item_of(b, el)
+    what = {'attachment': L(en='attachment', fr='pièce jointe'), 'note': L(en='note', fr='note'),
+            'annotation': L(en='annotation', fr='annotation')}.get(el.type, el.type)
+    if item is None:
+        return L(en=f'standalone {what}', fr=f'{what} isolée')
+    untitled = L(en='untitled', fr='sans titre')
+    return L(en=f'{what} of "{b.all_items[item].title[:60] or untitled}"',
+             fr=f'{what} de « {b.all_items[item].title[:60] or untitled} »')
 
 
-def _rapport_couleurs(op: Operation) -> list[str]:
-    avant = {c['name']: (i, c['color']) for i, c in enumerate(op.avant['value'] or [], 1)}
-    L = ['', '## Couleurs', '',
-         'Les tags de la méthode reçoivent une couleur et les premiers rangs du sélecteur de tags. Dans Zotero, la '
-         'touche du rang (1 à 9) pose ou retire le tag sur les fiches sélectionnées, et une pastille de sa couleur '
-         'marque chaque fiche qui le porte. Le premier groupe du plan, donc dans l\'essai.', '']
-    for i, c in enumerate(op.apres['value'], 1):
-        if c['name'] not in avant:
-            quoi = 'nouvelle couleur'
-        elif avant[c['name']][0] != i:
-            quoi = f'gardait le rang {avant[c["name"]][0]}, touche changée'
+def _to_list(tags: list, a: _Analysis) -> str:
+    return ', '.join(f"{_displayed(a, t['tag'])}{' (auto)' if t.get('type') == 1 else ''}"
+                     for t in tags) or L(en='none', fr='aucun')
+
+
+def _colors_report(op: Operation) -> list[str]:
+    before = {c['name']: (i, c['color']) for i, c in enumerate(op.before['value'] or [], 1)}
+    lines = ['', L(en='## Colors', fr='## Couleurs'), '',
+             L(en='The method tags receive a color and the first ranks of the tag selector. In Zotero, the key of '
+                  'the rank (1 to 9) sets or removes the tag on the selected items, and a dot of its color marks each '
+                  'item that carries it. The first group of the plan, hence in the trial.',
+               fr='Les tags de la méthode reçoivent une couleur et les premiers rangs du sélecteur de tags. Dans '
+                  'Zotero, la touche du rang (1 à 9) pose ou retire le tag sur les fiches sélectionnées, et une '
+                  "pastille de sa couleur marque chaque fiche qui le porte. Le premier groupe du plan, donc dans "
+                  "l'essai."), '']
+    for i, c in enumerate(op.after['value'], 1):
+        if c['name'] not in before:
+            what = L(en='new color', fr='nouvelle couleur')
+        elif before[c['name']][0] != i:
+            old_rank = before[c['name']][0]
+            what = L(en=f'had rank {old_rank}, key changed', fr=f'gardait le rang {old_rank}, touche changée')
         else:
             continue
-        L.append(f"- {i}. {c['name']} ({c['color']}), {quoi}" if i <= 9 else f"- {i}. {c['name']}, {quoi}, sans touche")
-    if len(op.apres['value']) > 9:
-        L.append(f"- Au-delà du rang 9, {pluriel(len(op.apres['value']) - 9, 'tag coloré')} sans touche.")
-    return L
+        lines.append(f"- {i}. {c['name']} ({c['color']}), {what}" if i <= 9
+                     else L(en=f"- {i}. {c['name']}, {what}, no key", fr=f"- {i}. {c['name']}, {what}, sans touche"))
+    if len(op.after['value']) > 9:
+        beyond = plural(len(op.after['value']) - 9, en='colored tag', fr='tag coloré')
+        lines.append(L(en=f'- Beyond rank 9, {beyond} with no key.', fr=f'- Au-delà du rang 9, {beyond} sans touche.'))
+    return lines
 
 
-def _rapport_plan(a: _Analyse, R: Regles, retenus: list, essai: int, jour: date,
-                  couleurs: Operation | None = None) -> str:
+def _plan_report(a: _Analysis, R: Rules, retained: list, trial: int, day: date,
+                  colors: Operation | None = None) -> str:
     b = a.b
-    fiches = sum(1 for el, _, _ in retenus if el.est_fiche)
-    L = [f'# Plan des tags du {jour:%d/%m/%Y}', '']
-    if not retenus:
-        L.append('Aucun tag à changer sur les éléments, seulement les couleurs.')
+    items = sum(1 for el, _, _ in retained if el.is_item)
+    lines = [L(en=f'# Tag plan of {day:%d/%m/%Y}', fr=f'# Plan des tags du {day:%d/%m/%Y}'), '']
+    if not retained:
+        lines.append(L(en='No tag to change on the elements, only the colors.',
+                       fr='Aucun tag à changer sur les éléments, seulement les couleurs.'))
     else:
-        L.append(f"{pluriel(len(retenus), 'élément')} à modifier, dont {fiches} fiche(s) et "
-                 f'{len(retenus) - fiches} pièce(s) jointe(s), note(s) ou annotation(s). Un groupe par élément, qui '
-                 'reçoit sa liste complète de tags. Un '
-                 'tag automatique conservé garde son type, un tag renommé devient manuel.')
-    if couleurs:
-        L += _rapport_couleurs(couleurs)
-    par_sorte = Counter(s for _, _, v in retenus for s in v.sortes)
-    if par_sorte:
-        L += ['', '## Par sorte de changement', '']
-        L += [f'- {SORTES[s]} : {par_sorte[s]} élément(s)' for s in SORTES if par_sorte[s]]
+        elements = plural(len(retained), en='element', fr='élément')
+        others = len(retained) - items
+        lines.append(L(en=f'{elements} to change, {items} item(s) and {others} attachment(s), note(s) or '
+                          'annotation(s). One group per element, which receives its complete list of tags. A kept '
+                          'automatic tag keeps its type, a renamed tag becomes manual.',
+                       fr=f'{elements} à modifier, dont {items} fiche(s) et {others} pièce(s) jointe(s), note(s) ou '
+                          'annotation(s). Un groupe par élément, qui reçoit sa liste complète de tags. Un tag '
+                          'automatique conservé garde son type, un tag renommé devient manuel.'))
+    if colors:
+        lines += _colors_report(colors)
+    by_kind = Counter(s for _, _, v in retained for s in v.kinds)
+    if by_kind:
+        lines += ['', L(en='## By kind of change', fr='## Par sorte de changement'), '']
+        names = kinds()
+        lines += [L(en=f'- {names[s]}: {by_kind[s]} element(s)', fr=f'- {names[s]} : {by_kind[s]} élément(s)')
+                  for s in names if by_kind[s]]
 
-    premiers = retenus[:essai]
-    if premiers and len(retenus) > essai:
-        L += ['', '## Essai', '',
-              f'Les {len(premiers)} premiers groupes, appliqués par `zc appliquer <plan> --essai`, couvrent chaque '
-              'sorte de changement. À vérifier avec `zc voir` :', '']
-        for el, op, v in premiers:
-            if el.cle in a.masquees:
-                L.append(f'- {el.cle} · {filtre.MASQUE} ({op.nature})')
+    first_groups = retained[:trial]
+    if first_groups and len(retained) > trial:
+        # With the colors, the trial applies their group first, then `trial - 1` elements (pilot bench).
+        n = len(first_groups) + bool(colors)
+        then = L(en=f' (the colors of the method tags, then {len(first_groups)} elements)',
+                 fr=f' (les couleurs des tags de la méthode, puis {len(first_groups)} éléments)') if colors else ''
+        lines += ['', L(en='## Trial', fr='## Essai'), '',
+                  L(en=f'The first {n} groups{then}, applied by `zc apply <plan> --trial`, cover each kind '
+                       'of change. To check with `zc show`:',
+                    fr=f'Les {n} premiers groupes{then}, appliqués par `zc apply <plan> --trial`, couvrent '
+                       'chaque sorte de changement. À vérifier avec `zc show` :'), '']
+        for el, op, v in first_groups:
+            nature = nature_shown(op.nature)
+            if el.key in a.hidden:
+                lines.append(f'- {el.key} · {privacy.mask()} ({nature})')
             else:
-                L.append(f'- {el.cle} · {_titre(b, el, a.masquees)} ({op.nature}) : avant {_liste(op.avant["tags"], a)}'
-                         f' ; après {_liste(op.apres["tags"], a)}')
+                before, after = _to_list(op.before["tags"], a), _to_list(op.after["tags"], a)
+                lines.append(L(en=f'- {el.key} · {_title(b, el, a.hidden)} ({nature}): before {before} ; '
+                                  f'after {after}',
+                               fr=f'- {el.key} · {_title(b, el, a.hidden)} ({nature}) : avant {before} ; '
+                                  f'après {after}'))
 
-    retires = Counter(n for _, _, v in retenus for n, s in v.retires if s != 'automatique')
-    raisons = {n: {'importé': 'mot-clé importé', 'état': "état moins avancé qu'un autre de la fiche"}.get(s, '')
-               for _, _, v in retenus for n, s in v.retires}
-    renommes = Counter((n, c) for _, _, v in retenus for n, c, _ in v.renommes)
-    autos = Counter(n for _, _, v in retenus for n, s in v.retires if s == 'automatique')
+    removed = Counter(n for _, _, v in retained for n, s in v.removed if s != 'automatique')
+    reasons = {n: {'importé': L(en='imported keyword', fr='mot-clé importé'),
+                   'état': L(en='status less advanced than another of the item',
+                             fr="état moins avancé qu'un autre de la fiche")}.get(s, '')
+               for _, _, v in retained for n, s in v.removed}
+    renamed = Counter((n, c) for _, _, v in retained for n, c, _ in v.renamed)
+    autos = Counter(n for _, _, v in retained for n, s in v.removed if s == 'automatique')
     if autos:
-        L += ['', '## Tags automatiques retirés par la règle globale', '',
-              f"{pluriel(len(autos), 'nom')}, {sum(autos.values())} occurrence(s). Les plus portés : "
-              + ', '.join(f'{_affiche(a, n)} ({k})' for n, k in autos.most_common(20)) + '.']
-    if retires:
-        L += ['', '## Tags retirés', '']
-        L += [f"- {_affiche(a, n)} ({k}{', ' + raisons[n] if raisons.get(n) else ''})"
-              for n, k in sorted(retires.items(), key=lambda x: norm(x[0]))]
-    if renommes:
-        L += ['', '## Tags renommés', '']
-        L += [f'- {_affiche(a, n)} → {c} ({k})' for (n, c), k in sorted(renommes.items(), key=lambda x: norm(x[0][0]))]
+        names_count = plural(len(autos), en='name', fr='nom')
+        most = ', '.join(f'{_displayed(a, n)} ({k})' for n, k in autos.most_common(20))
+        lines += ['', L(en='## Automatic tags removed by the global rule', fr='## Tags automatiques retirés par la règle globale'), '',
+                  L(en=f'{names_count}, {sum(autos.values())} occurrence(s). The most carried: {most}.',
+                    fr=f'{names_count}, {sum(autos.values())} occurrence(s). Les plus portés : {most}.')]
+    if removed:
+        lines += ['', L(en='## Tags removed', fr='## Tags retirés'), '']
+        lines += [f"- {_displayed(a, n)} ({k}{', ' + reasons[n] if reasons.get(n) else ''})"
+                  for n, k in sorted(removed.items(), key=lambda x: norm(x[0]))]
+    if renamed:
+        lines += ['', L(en='## Tags renamed', fr='## Tags renommés'), '']
+        lines += [f'- {_displayed(a, n)} → {c} ({k})' for (n, c), k in sorted(renamed.items(), key=lambda x: norm(x[0][0]))]
 
-    touches = set(retires) | set(autos) | {n for n, _ in renommes}
-    a_jour = sorted((rech, n) for n, rechs in R.cites.items() if n in touches for rech in rechs)
-    if a_jour:
-        L += ['', '## Recherches enregistrées à mettre à jour dans Zotero', '']
-        L += [f'- « {rech} » cite « {_affiche(a, n)} », retiré ou renommé par ce plan' for rech, n in a_jour]
-    disparus = {n for n in touches if not any(n == t['tag'] for _, op, _ in retenus for t in op.apres['tags'])}
-    corbeille = sum(b.tags_corbeille.get(n, 0) for n in disparus)
-    if corbeille:
-        L += ['', f'{corbeille} occurrence(s) de ces tags restent sur des éléments de la corbeille, qui ne sont pas '
-                  'touchés. Elles disparaîtront en vidant la corbeille.']
-    if R.problemes:
-        L += ['', '## À regarder', '']
-        L += [f'- {p}' for p in dict.fromkeys(R.problemes)]
+    touched = set(removed) | set(autos) | {n for n, _ in renamed}
+    up_to_date = sorted((srch, n) for n, srchs in R.citing.items() if n in touched for srch in srchs)
+    if up_to_date:
+        lines += ['', L(en='## Saved searches to update in Zotero', fr='## Recherches enregistrées à mettre à jour dans Zotero'), '']
+        lines += [L(en=f'- "{srch}" cites "{_displayed(a, n)}", removed or renamed by this plan',
+                    fr=f'- « {srch} » cite « {_displayed(a, n)} », retiré ou renommé par ce plan')
+                  for srch, n in up_to_date]
+    vanished_names = {n for n in touched if not any(n == t['tag'] for _, op, _ in retained for t in op.after['tags'])}
+    trash = sum(b.trash_tags.get(n, 0) for n in vanished_names)
+    if trash:
+        lines += ['', L(en=f'{trash} occurrence(s) of these tags stay on elements in the trash, which are not touched. '
+                           'They will disappear when the trash is emptied.',
+                        fr=f'{trash} occurrence(s) de ces tags restent sur des éléments de la corbeille, qui ne sont '
+                           'pas touchés. Elles disparaîtront en vidant la corbeille.')]
+    if R.problems:
+        lines += ['', L(en='## To look at', fr='## À regarder'), '']
+        lines += [f'- {p}' for p in dict.fromkeys(R.problems)]
 
-    L += ['', '## Groupes', ''] if retenus else []
-    for el, op, v in retenus:
-        if el.cle in a.masquees:
-            L.append(f'- {el.cle} · {filtre.MASQUE} : {op.nature}')
+    lines += ['', L(en='## Groups', fr='## Groupes'), ''] if retained else []
+    for el, op, v in retained:
+        if el.key in a.hidden:
+            nature = nature_shown(op.nature)
+            lines.append(L(en=f'- {el.key} · {privacy.mask()}: {nature}', fr=f'- {el.key} · {privacy.mask()} : {nature}'))
             continue
-        morceaux = [f'retire {", ".join(_affiche(a, n) for n, _ in v.retires)}'] if v.retires else []
-        morceaux += [f'{_affiche(a, n)} → {c}' for n, c, _ in v.renommes]
-        L.append(f'- {el.cle} · {_titre(b, el, a.masquees)} : ' + ' ; '.join(morceaux))
-    return '\n'.join(L) + '\n'
+        chunks = [L(en=f'removes {", ".join(_displayed(a, n) for n, _ in v.removed)}',
+                    fr=f'retire {", ".join(_displayed(a, n) for n, _ in v.removed)}')] if v.removed else []
+        chunks += [f'{_displayed(a, n)} → {c}' for n, c, _ in v.renamed]
+        lines.append(L(en=f'- {el.key} · {_title(b, el, a.hidden)}: ', fr=f'- {el.key} · {_title(b, el, a.hidden)} : ')
+                     + ' ; '.join(chunks))
+    return '\n'.join(lines) + '\n'

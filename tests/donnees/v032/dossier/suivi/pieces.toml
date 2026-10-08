@@ -1,0 +1,46 @@
+# PDF identiques repérés par `zc pieces chercher`, avec les décisions prises.
+# Ce fichier se relit et se modifie à la main ou avec l'agent. `zc pieces chercher` le met à jour
+# sans perdre les décisions, `zc pieces planifier` prépare le plan des groupes à appliquer.
+# Les décisions s'écrivent avec `zc pieces accepter` (--corbeille, --rattacher) et `zc pieces refuser` (garder).
+#
+# decision  : "appliquer" (mettre à la corbeille et rattacher comme indiqué), "garder" (copies voulues, par exemple
+#             un chapitre et le livre entier, à ne plus signaler) ou "" (à juger).
+# corbeille : clés des copies à mettre à la corbeille. Une copie annotée ou portant une note est refusée.
+# rattacher : copie -> fiche, pour déplacer une copie (annotée, par exemple) vers la bonne fiche.
+# raison    : note libre.
+
+[[pdf]]
+# 2222UUBA sur 2222UUB3 · Durand · Paint and Be Happy (Article de revue)
+# 2222UUBB sur 2222UUB4 · Durand · Loser wins (Article de revue)
+copies = ["2222UUBA", "2222UUBB"]
+decision = "appliquer"
+corbeille = ["2222UUBB"]
+rattacher = {  }
+raison = ""
+
+[[pdf]]
+# 2222UUBC sur 2222UUB5 · Durand · Mind in society (Article de revue)
+# 2222UUBD sur 2222UUB5 · Durand · Mind in society (Article de revue)
+copies = ["2222UUBC", "2222UUBD"]
+decision = "appliquer"
+corbeille = ["2222UUBD"]
+rattacher = {  }
+raison = ""
+
+[[pdf]]
+# 2222UUBE sur 2222UUB6 · Durand · The practice turn (Article de revue)
+# 2222UUBF sur 2222UUB7 · Durand · Throwing out the tacit rule book (Article de revue)
+copies = ["2222UUBE", "2222UUBF"]
+decision = "garder"
+corbeille = []
+rattacher = {  }
+raison = "chapitre et livre entier"
+
+[[pdf]]
+# 2222UUBG sur 2222UUB8 · Durand · Le bon article (Article de revue)
+# 2222UUBH sur 2222UUB9 · Durand · Un autre article (Article de revue, 1 annotation(s) ou note(s))
+copies = ["2222UUBG", "2222UUBH"]
+decision = "appliquer"
+corbeille = ["2222UUBG"]
+rattacher = { "2222UUBH" = "2222UUB8" }
+raison = ""

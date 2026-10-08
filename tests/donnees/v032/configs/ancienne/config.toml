@@ -1,0 +1,26 @@
+[zotero]
+dossier = "/zotero-factice/Zotero"
+
+[methode]
+projets = "10 Projets"
+modele_fichier = "{{ authors }}"
+etats = ["à lire", "lu"]
+
+[sauvegarde]
+dossier = "/sauvegardes-factices"
+delai_heures = 48
+conserver = 3
+
+[confidentialite]
+tags_exclus = ["_privé", "_perso"]
+collections_exclues = ["Fonds/Privé"]
+
+[sources]
+contact = "auteur@exemple.org"
+bnf = false
+
+[metadonnees]
+exclus_par_type = { journalArticle = ["publisher"], book = ["series"] }
+
+[tags]
+proteges = ["à garder"]

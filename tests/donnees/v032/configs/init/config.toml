@@ -1,0 +1,75 @@
+# Configuration de zot-clean pour cette bibliothèque.
+# Chaque réglage de [methode] a une valeur par défaut, décommenter pour la changer.
+# Les raisons de la méthode par défaut sont expliquées dans methode.md, à côté de ce fichier.
+
+[zotero]
+dossier = "/zotero-factice/Zotero"
+
+[methode]
+# Collections racines. Laisser vide ("") pour s'en passer.
+# inbox = "Inbox"
+# Racines des projets, une ou plusieurs, par exemple ["Cours", "Articles"]. Liste vide pour s'en passer.
+# projets = ["Projets"]
+# fonds = "Fonds"
+# archives = "Archives"
+# etats = ["1 à lire", "2 en cours", "3 lu"]
+# autres_tags = ["★ essentiel", "papier"]
+# Couleurs des états puis des autres tags, dans l'ordre. Un tag coloré reçoit la touche de son rang (1 à 9).
+# couleurs = ["#FF6666", "#FF8C19", "#5FB236", "#FFD400", "#A28AE5"]
+# prefixe_concept = "#"
+# prefixe_technique = "_"
+# Nombre de références au-delà duquel un thème du fonds peut recevoir des sous-thèmes.
+# seuil_sous_theme = 40
+# profondeur_max = 3
+# Les noms des PDF suivent le modèle réglé dans Zotero (Réglages › Général › Renommage des fichiers).
+# Mot qui joint deux auteurs dans ces noms. S'il reste vide, déduit des noms existants, sinon de la langue de Zotero.
+# conjonction = "et"
+# Clés de citation. Better BibTeX détecté.
+# cles_citation = true
+
+[ecriture]
+# Nombre de groupes appliqués à l'essai avant l'application complète d'un plan.
+# essai = 5
+
+[sauvegarde]
+# Dossier des sauvegardes, par défaut à côté du dossier Zotero (même disque, hors iCloud ou OneDrive).
+# dossier = "~/Zotero-sauvegardes"
+# Âge maximal, en heures, d'une sauvegarde pour autoriser une application complète.
+# delai_heures = 24
+# Nombre de sauvegardes gardées, les plus récentes (au moins 1).
+# conserver = 2
+
+[confidentialite]
+# Fiches jamais transmises à l'agent ni cherchées par leur titre chez Crossref ou OpenAlex.
+# tags_exclus = ["_privé"]
+# collections_exclues = []
+
+[sources]
+# Adresse électronique de l'utilisateur de la bibliothèque, transmise seulement à Crossref et OpenAlex, qui
+# répondent plus vite aux requêtes identifiées (étape 3). Facultative, laisser "" pour s'en passer.
+contact = "auteur@exemple.org"
+# crossref = true
+# openalex = true
+# Livres : BnF, Sudoc et Open Library.
+# bnf = true
+# sudoc = true
+# openlibrary = true
+# Recherches OpenAlex par jour, avec la clé OPENALEX_API_KEY du fichier .env.
+# plafond_openalex = 900
+
+[metadonnees]
+# Champs complétés quand ils sont vides. Ajouter "abstractNote" pour les résumés.
+# champs = ["DOI", "ISBN", "ISSN", "date", "publicationTitle", "bookTitle", "proceedingsTitle", "volume", "issue", "pages", "publisher", "place", "language", "creators"]
+# Champs jamais complétés pour un type (l'éditeur commercial d'une revue n'est pas utile).
+# exclus_par_type = { journalArticle = ["publisher", "place"] }
+# seuil_sur = 0.95
+
+[tags]
+# Étape 6. Un tag automatique porté par au moins tant de fiches est proposé comme exception à leur suppression.
+# seuil_candidat = 5
+# Au-delà de tant de tags manuels rares sur une fiche, ce sont sans doute des mots-clés importés.
+# seuil_mots_cles = 8
+# Nombre de thèmes du fonds sur lesquels un tag doit se répartir pour devenir un concept.
+# dispersion_concept = 2
+# Tags à ne jamais changer, en plus des tags techniques, des états, des marques et des tags colorés.
+# proteges = []

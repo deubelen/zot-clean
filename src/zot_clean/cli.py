@@ -1,1352 +1,1730 @@
-"""Ligne de commande `zc`."""
+"""`zc` command line."""
 
 import argparse
 import contextlib
 import json
+import os
 import re
+import shlex
 import sys
 import threading
 import time
 from datetime import date, datetime
 from pathlib import Path
 
-from zot_clean import __version__
+from zot_clean import __version__, lang, registry
+from zot_clean.lang import L, plural
 
-# Messages d'argparse en français (D4). argparse les fait passer par ses fonctions `_` et `ngettext`, remplacées ici.
-# Un message absent de la table (autre version de Python) reste en anglais. Clés reprises telles quelles des versions
-# 3.11 à 3.14 d'argparse.
-MESSAGES_ARGPARSE = {
-    'usage: ': 'usage : ',
-    '%(heading)s:': '%(heading)s :',
-    'positional arguments': 'arguments',
-    'optional arguments': 'options',
-    'options': 'options',
-    'show this help message and exit': 'affiche cette aide',
-    "show program's version number and exit": 'affiche la version',
-    ' (default: %(default)s)': ' (par défaut, %(default)s)',
-    'the following arguments are required: %s': 'arguments obligatoires manquants : %s',
-    'one of the arguments %s is required': "l'un des arguments %s est obligatoire",
-    'unrecognized arguments: %s': 'arguments non reconnus : %s',
-    'invalid choice: %(value)r (choose from %(choices)s)': 'choix invalide : %(value)r (au choix : %(choices)s)',
-    'invalid choice: %(value)r, maybe you meant %(closest)r?': 'choix invalide : %(value)r, peut-être %(closest)r ?',
-    'unknown parser %(parser_name)r (choices: %(choices)s)':
-        'commande inconnue : %(parser_name)r (au choix : %(choices)s)',
-    'invalid %(type)s value: %(value)r': 'valeur invalide (%(type)s) : %(value)r',
-    '%(prog)s: error: %(message)s\n': '%(prog)s : erreur : %(message)s\n',
-    'argument %(argument_name)s: %(message)s': 'argument %(argument_name)s : %(message)s',
-    'expected one argument': 'une valeur attendue',
-    'expected at most one argument': 'une valeur au plus attendue',
-    'expected at least one argument': 'au moins une valeur attendue',
-    'expected %s argument': '%s valeur attendue',
-    'expected %s arguments': '%s valeurs attendues',
-    'not allowed with argument %s': "incompatible avec l'argument %s",
-    'ambiguous option: %(option)s could match %(matches)s': 'option ambiguë : %(option)s peut désigner %(matches)s',
-    'ignored explicit argument %r': 'valeur %r non admise par cette option',
-    'unexpected option string: %s': 'option inattendue : %s',
-}
+# Commands not yet available, with their milestone (D31), listed in the help. `trier`, planned for v0.3, became
+# `zc inbox` (D135) and no longer appears there.
+UPCOMING: dict[str, tuple[str, str]] = {}
 
 
-def _traduire_pluriel(singulier: str, pluriel: str, n: int) -> str:
-    message = singulier if n == 1 else pluriel
-    return MESSAGES_ARGPARSE.get(message, message)
+_secret_rejected = False
 
 
-argparse._ = lambda message: MESSAGES_ARGPARSE.get(message, message)
-argparse.ngettext = _traduire_pluriel
-
-# Commandes pas encore disponibles, avec leur jalon (D31), listées dans l'aide. `trier`, prévue pour la v0.3, est
-# devenue `zc inbox` (D135) et n'y figure plus.
-A_VENIR: dict[str, tuple[str, str]] = {}
-
-
-_secret_refuse = False
-
-
-def _lire_a_jour(cfg):
-    """Bibliothèque à jour pour une commande qui ne fait que lire (D171, D174). Copie locale seule si zotero.org est
-    injoignable."""
-    from zot_clean import appliquer as a, ecriture, lecture
+def _read_up_to_date(cfg):
+    """Up-to-date library for a command that only reads (D171, D174). Local copy alone if zotero.org is
+    unreachable."""
+    from zot_clean import apply as a, api, reader
     try:
-        client = ecriture.depuis_config(cfg)
-    except SystemExit:  # pas de clé API : la copie locale seule
-        return lecture.lire(cfg.base)
-    return a.lire_a_jour(cfg, client, _progression, facultatif=True)
+        client = api.from_config(cfg)
+    except SystemExit:  # no API key: the local copy alone
+        return reader.read(cfg.database)
+    return a.read_up_to_date(cfg, client, _progress, optional=True)
 
 
-def _progression(message: str) -> None:
-    """Ligne de progression d'une commande longue, sur la sortie d'erreur pour ne pas se mêler au résultat."""
+def _warn(message: str) -> None:
+    print(L(en=f'Warning. {message}', fr=f'Attention. {message}'))
+
+
+def _error(message: str) -> None:
+    print(L(en=f'Error. {message}', fr=f'Erreur. {message}'))
+
+
+def _groups_line(plan) -> str:
+    return L(en=f'{len(plan.groups)} group(s), {plan.n_operations} operation(s).',
+             fr=f'{len(plan.groups)} groupe(s), {plan.n_operations} opération(s).')
+
+
+def _plan_paths(path) -> str:
+    return L(en=f"Plan: {path}\nReport: {path.with_suffix('.md')}",
+             fr=f"Plan : {path}\nRapport : {path.with_suffix('.md')}")
+
+
+def _read_then_trial(path) -> str:
+    return L(en=f'Read the report, then `zc apply {path} --trial`.',
+             fr=f'Relire le rapport, puis `zc apply {path} --trial`.')
+
+
+def _progress(message: str) -> None:
+    """Progress line of a long command, on the error output so as not to mix with the result."""
     print(message, file=sys.stderr)
 
 
-def _secret_hors_terminal(_invite: str) -> str:
-    """Hors d'un terminal, aucune clé n'est demandée. Le message ne s'affiche qu'une fois par lancement."""
-    global _secret_refuse
-    if not _secret_refuse:
-        _secret_refuse = True
-        print("Pas de terminal interactif (zc init lancé par un agent ou un script ?). Les clés ne doivent pas passer "
-              "par un agent. Relancer `zc init` soi-même dans un terminal pour les saisir.")
+def _secret_outside_terminal(_prompt: str) -> str:
+    """Outside a terminal, no key is asked for. The message is shown only once per launch."""
+    global _secret_rejected
+    if not _secret_rejected:
+        _secret_rejected = True
+        print(L(en='No interactive terminal (zc init run by an agent or a script?). Keys must not go through an '
+                  'agent. Run `zc init` yourself in a terminal to enter them.',
+                fr="Pas de terminal interactif (zc init lancé par un agent ou un script ?). Les clés ne doivent pas "
+                   "passer par un agent. Relancer `zc init` soi-même dans un terminal pour les saisir."))
     return ''
 
 
-def _demander(invite: str) -> str:
+def _ask(prompt: str) -> str:
     try:
-        return input(invite)
-    except EOFError:
+        return input(prompt)
+    except EOFError:  # input closed (agent, script): end the question's line before what follows
+        print()
         return ''
 
 
 def init(args) -> int:
     import getpass
-    from zot_clean import init as i
-    secret = getpass.getpass if sys.stdin.isatty() else _secret_hors_terminal
-    return i.initialiser(args.dossier.resolve(), args.dossier_zotero, args.maj, _demander, secret, print)
+    from zot_clean import init as i, lang
+    folder = args.folder.resolve()
+    interactive = sys.stdin.isatty()
+    language = i.choose_language(folder, args.library_language, args.update, _ask if interactive else None, print)
+    if language is None:
+        return 1
+    secret = getpass.getpass if interactive else _secret_outside_terminal
+    with lang.language(language):
+        return i.initialize(folder, args.zotero_dir, args.update, _ask, secret, print, language)
 
 
 def audit(args) -> int:
-    from zot_clean import audit as a, config, lecture
-    cfg = config.charger(args.dossier)
+    from zot_clean import audit as a, config, reader
+    cfg = config.load(args.workspace)
     try:
-        b = lecture.lire(cfg.base)
-    except (FileNotFoundError, lecture.SchemaInconnu) as e:
+        b = reader.read(cfg.database)
+    except (FileNotFoundError, reader.UnknownSchema) as e:
         print(e, file=sys.stderr)
         return 2
-    client = _client_du_compte(cfg, b, args.hors_ligne)
-    en_ligne, motif = (_fichiers_en_ligne(cfg, b, a.absents_importes(b), client) if not args.hors_ligne
-                       else (None, 'option --hors-ligne'))
-    sections = a.auditer(b, cfg, empreintes=not args.sans_empreintes, en_ligne=en_ligne, motif=motif)
-    from zot_clean import controle as k, filtre
-    section, memoire = k.plan_du_fonds(b, cfg, filtre.cles_masquees(b, cfg))
+    client = _account_client(cfg, b, args.offline)
+    lag = _local_copy_behind(client, b) if client and not args.offline else ''
+    online, cause = (_online_files(cfg, b, a.missing_imported(b), client) if not args.offline
+                       else (None, L(en='option --offline', fr='option --offline')))
+    sections = a.run_audit(b, cfg, fingerprints=not args.no_hashes, online=online, cause=cause)
+    from zot_clean import checkup as k, privacy
+    section, memory = k.outline_check(b, cfg, privacy.hidden_keys(b, cfg))
     sections.append(section)
-    jour = date.today()
-    inst = k.instantane(sections, b)
-    avant = k.precedent(cfg, jour)
-    evolution = k.evolution(sections, inst, avant[1], avant[0]) if avant else k.sans_comparaison()
-    cfg.rapports.mkdir(parents=True, exist_ok=True)
-    sortie = cfg.rapports / f'audit-{jour:%Y-%m-%d}.md'
-    sortie.write_text(a.rapport(sections, b, jour, evolution), encoding='utf-8')
-    k.enregistrer_instantane(cfg, inst, jour)
-    if memoire is not None:
-        k.ecrire_memoire(cfg, memoire)
+    day = date.today()
+    snap = k.snapshot(sections, b)
+    before = k.previous(cfg, day)
+    evolution = k.evolution(sections, snap, before[1], before[0]) if before else k.no_comparison()
+    cfg.reports.mkdir(parents=True, exist_ok=True)
+    output = cfg.reports / f'audit-{day:%Y-%m-%d}.md'
+    text = a.report(sections, b, day, evolution)
+    if lag:  # at the top of the report too, which the agent summarizes
+        title, _, rest = text.partition('\n')
+        text = f'{title}\n\n> {lag}\n{rest}'
+    output.write_text(text, encoding='utf-8')
+    k.save_snapshot(cfg, snap, day)
+    if memory is not None:
+        k.write_memory(cfg, memory)
+    if lag:
+        print(lag + '\n')
+    width = max((len(a.status_label(s.status)) for s in sections), default=0)
     for i, s in enumerate(sections, 1):
-        print(f'{s.statut:7} {i:2}. {s.titre} : {s.resume}')
-    if avant:
-        changes = [l for l in evolution if l.startswith('- ')]
-        print(f"\nDepuis l'audit du {avant[0]:%d/%m/%Y} : " + (f'{len(changes)} contrôle(s) avec du nouveau ou du réglé, '
-              'détail en tête du rapport.' if changes else 'aucun point nouveau ni réglé.'))
+        label = a.status_label(s.status).ljust(width)
+        print(L(en=f'{label} {i:2}. {s.title}: {s.summary}', fr=f'{label} {i:2}. {s.title} : {s.summary}'))
+    if before:
+        changed = [l for l in evolution if l.startswith('- ')]
+        print(L(en=f"\nSince the audit of {before[0]:%d/%m/%Y}: ", fr=f"\nDepuis l'audit du {before[0]:%d/%m/%Y} : ")
+              + (L(en=f'{len(changed)} check(s) with something new or settled, details at the top of the report.',
+                   fr=f'{len(changed)} contrôle(s) avec du nouveau ou du réglé, détail en tête du rapport.')
+                 if changed else L(en='nothing new or settled.', fr='aucun point nouveau ni réglé.')))
     else:
-        print("\nAucun audit d'un jour précédent, rien n'est comparé.")
-    print(f'\nRapport complet : {sortie}')
+        print(L(en='\nNo audit from a previous day, nothing is compared.',
+                fr="\nAucun audit d'un jour précédent, rien n'est comparé."))
+    print(L(en=f'\nFull report: {output}', fr=f'\nRapport complet : {output}'))
     return 0
 
 
-def _client_du_compte(cfg, b, hors_ligne: bool):
-    """Client de la clé pour l'audit, None sans clé (audit de la seule copie locale, comme avant). Refus si la clé
-    n'est pas celle du compte synchronisé, comme pour toute commande qui se sert de la clé. L'audit est
-    la première commande d'une séance, et le refus y arrive avant un rapport complet sur lequel on préparerait un
-    travail que toutes les commandes suivantes refuseraient. Les fichiers absents y seraient d'ailleurs cherchés
-    dans une autre bibliothèque, et tous donnés pour perdus. `--hors-ligne` ne se sert pas de la clé, l'audit de la
-    copie locale se fait, avec le refus en avertissement."""
-    from zot_clean import appliquer as a, ecriture
+def _local_copy_behind(client, b) -> str:
+    """Warning when zotero.org holds changes that Zotero has not received yet, for example those of a plan just
+    applied. The audit reads the local copy alone (D171), its figures are then those of before (pilot bench, D242).
+    Empty when up to date or when zotero.org cannot be reached."""
+    from zot_clean import api
     try:
-        client = ecriture.depuis_config(cfg)
+        behind = client.server_version() > b.version
+    except (api.APIError, api.Refusal, OSError):
+        return ''
+    return L(en='**Warning.** Zotero has not yet received the latest changes made on zotero.org (a plan just applied, '
+                'for instance). This audit reads the copy of this computer, so its figures are those of before. '
+                'Synchronize Zotero (green arrow), then run `zc audit` again.',
+             fr="**Attention.** Zotero n'a pas encore reçu les derniers changements faits sur zotero.org (un plan qui "
+                "vient d'être appliqué, par exemple). Cet audit lit la copie de cet ordinateur, ses chiffres sont donc "
+                "ceux d'avant. Synchroniser Zotero (flèche verte), puis relancer `zc audit`.") if behind else ''
+
+
+def _account_client(cfg, b, offline: bool):
+    """Client for the key for the audit, None without a key (audit of the local copy alone, as before). Refusal if the
+    key is not that of the synced account, as for any command that uses the key. The audit is
+    the first command of a session, and the refusal comes there before a complete report on which work would be
+    prepared that all the following commands would refuse. Missing files would also be looked for
+    in another library there, and all reported as lost. `--offline` does not use the key, the audit of the
+    local copy is done, with the refusal as a warning."""
+    from zot_clean import apply as a, api
+    try:
+        client = api.from_config(cfg)
     except SystemExit:
         return None
     try:
-        a.controler_compte(client.utilisateur, b.compte)
-    except ecriture.Refus as e:
-        if hors_ligne:
-            print(f'Attention. {e}\n')
+        a.check_account(client.user, b.account)
+    except api.Refusal as e:
+        if offline:
+            print(L(en=f'Warning. {e}\n', fr=f'Attention. {e}\n'))
             return None
-        raise ecriture.Refus(f"{e}\nEn attendant, `zc audit --hors-ligne` fait l'audit de la seule bibliothèque "
-                             'de cet ordinateur, sans se servir de la clé.') from None
+        raise api.Refusal(L(en=f'{e}\nMeanwhile, `zc audit --offline` audits only the library of this computer, '
+                               'without using the key.',
+                            fr=f"{e}\nEn attendant, `zc audit --offline` fait l'audit de la seule bibliothèque "
+                               'de cet ordinateur, sans se servir de la clé.')) from None
     return client
 
 
-# Fichiers trouvés sur zotero.org, clé de la pièce jointe -> version de l'élément. Hors de `cache/*.json`, que
-# `--rafraichir` vide pour les seules sources de métadonnées.
-EN_LIGNE = Path('zotero') / 'fichiers_en_ligne.json'
+# Files found on zotero.org, attachment key -> item version. Outside `cache/*.json`, which
+# `--refresh` empties for the metadata sources only.
+ONLINE = Path('zotero') / 'fichiers_en_ligne.json'
 
 
-def _fichiers_en_ligne(cfg, b, cles: list[str], client=None) -> tuple[dict[str, bool] | None, str]:
-    """Fichiers absents du disque encore stockés sur zotero.org (D133), ou None et la raison. Un fichier trouvé est
-    retenu avec la version de sa pièce jointe et n'est plus demandé tant qu'elle ne change pas. Un fichier introuvable
-    est redemandé à chaque fois, puisqu'il peut arriver d'un autre ordinateur avant que Zotero ne reçoive la nouvelle
-    version, et ces fichiers perdus sont peu nombreux."""
-    from zot_clean import ecriture
-    if not cles:
+def _online_files(cfg, b, keys: list[str], client=None) -> tuple[dict[str, bool] | None, str]:
+    """Files missing from disk that are still stored on zotero.org (D133), or None and the reason. A file found is
+    remembered with the version of its attachment and is no longer asked for as long as that does not change. A file
+    not found is asked for again each time, since it may arrive from another computer before Zotero receives the new
+    version, and these lost files are few."""
+    from zot_clean import api
+    if not keys:
         return {}, ''
-    versions = {p.cle: p.version for p in b.pieces.values() if p.version}  # 0 : jamais synchronisée
-    fichier = cfg.cache / EN_LIGNE
+    versions = {p.key: p.version for p in b.attachments.values() if p.version}  # 0: never synced
+    file = cfg.cache / ONLINE
     try:
-        memoire = json.loads(fichier.read_text(encoding='utf-8'))
+        memory = json.loads(file.read_text(encoding='utf-8'))
     except (OSError, ValueError):
-        memoire = {}
-    # Seules restent les pièces jointes encore là et inchangées.
-    memoire = {k: v for k, v in memoire.items() if v and versions.get(k) == v} if isinstance(memoire, dict) else {}
-    res = {cle: True for cle in cles if cle in memoire}
-    a_chercher = [cle for cle in cles if cle not in res]
+        memory = {}
+    # Only the attachments still there and unchanged remain.
+    memory = {k: v for k, v in memory.items() if v and versions.get(k) == v} if isinstance(memory, dict) else {}
+    res = {key: True for key in keys if key in memory}
+    to_find = [key for key in keys if key not in res]
 
-    def retenir():
+    def remember():
         try:
-            fichier.parent.mkdir(parents=True, exist_ok=True)
-            fichier.write_text(json.dumps(memoire, sort_keys=True), encoding='utf-8')
+            file.parent.mkdir(parents=True, exist_ok=True)
+            file.write_text(json.dumps(memory, sort_keys=True), encoding='utf-8')
         except OSError:
-            pass  # sans mémoire, le prochain audit redemande ces fichiers
+            pass  # without memory, the next audit asks for these files again
 
-    if not a_chercher:
-        retenir()
+    if not to_find:
+        remember()
         return res, ''
     try:
-        client = client or ecriture.depuis_config(cfg)
+        client = client or api.from_config(cfg)
     except SystemExit:
-        return None, 'pas de clé API'
+        return None, L(en='no API key', fr='pas de clé API')
     try:
-        for i, cle in enumerate(a_chercher, 1):
-            res[cle] = client.fichier_en_ligne(cle)
-            if res[cle] and versions.get(cle):
-                memoire[cle] = versions[cle]
-            if i % 50 == 0 or i == len(a_chercher):
-                print(f'{i}/{len(a_chercher)} fichiers absents cherchés sur zotero.org', file=sys.stderr)
-                retenir()
-    except ecriture.ErreurAPI:
-        retenir()
-        return None, 'zotero.org injoignable'
+        for i, key in enumerate(to_find, 1):
+            res[key] = client.file_online(key)
+            if res[key] and versions.get(key):
+                memory[key] = versions[key]
+            if i % 50 == 0 or i == len(to_find):
+                print(L(en=f'{i}/{len(to_find)} missing files looked for on zotero.org',
+                        fr=f'{i}/{len(to_find)} fichiers absents cherchés sur zotero.org'), file=sys.stderr)
+                remember()
+    except api.APIError:
+        remember()
+        return None, L(en='zotero.org unreachable', fr='zotero.org injoignable')
     return res, ''
 
 
-def _inbox(args, preparer: bool) -> int:
-    from zot_clean import appliquer as a, config, ecriture, inbox as i, lecture, metadonnees as m, plans, sources
-    from zot_clean.ecriture import ErreurAPI, Refus
-    cfg = config.charger(args.dossier)
+def _inbox(args, prepare: bool) -> int:
+    from zot_clean import apply as a, config, api, inbox as i, reader, metadata as m, plans, sources
+    from zot_clean.api import APIError, Refusal
+    cfg = config.load(args.workspace)
     try:
-        if avert := a.controler_synchronisation(cfg):
-            print(f'Attention. {avert}')
-        client = ecriture.depuis_config(cfg)
-        b = lecture.lire(cfg.base) if preparer else a.lire_a_jour(cfg, client, _progression)
-        a.controler_compte(client.utilisateur, b.compte)  # déjà fait par `lire_a_jour`, pas par la seule lecture
-        services = sources.depuis_config(cfg)
-        schema = lecture.lire_types(cfg.base)
-        if preparer:
-            rapport, liste = i.preparer(b, cfg, services, client, schema, m.afficher_progression)
+        if warn_msg := a.check_sync(cfg):
+            _warn(warn_msg)
+        client = api.from_config(cfg)
+        b = a.read_up_to_date(cfg, client, _progress, optional=prepare)  # D171, D240
+        a.check_account(client.user, b.account)  # already done by `read_up_to_date`, not by the plain read
+        services = sources.from_config(cfg)
+        schema = reader.read_types(cfg.database)
+        if prepare:
+            report, listing = i.prepare(b, cfg, services, client, schema, m.show_progress)
         else:
-            plan, rapport = i.planifier(b, cfg, services, client, schema, m.afficher_progression)
-        for avert in services.avertissements():
-            print(f'Attention. {avert}')
-    except (Refus, ErreurAPI, FileNotFoundError, lecture.SchemaInconnu) as e:
+            plan, report = i.make_plan(b, cfg, services, client, schema, m.show_progress)
+        for warn_msg in services.warnings():
+            _warn(warn_msg)
+        if note := services.contact_note():  # optional address, a note rather than a warning (pilot bench)
+            print(note)
+    except (Refusal, APIError, FileNotFoundError, reader.UnknownSchema) as e:
         print(e, file=sys.stderr)
         return 1
-    if preparer:
-        cfg.rapports.mkdir(parents=True, exist_ok=True)
-        sortie = cfg.rapports / f'inbox-{date.today():%Y-%m-%d}.md'
-        sortie.write_text(rapport, encoding='utf-8')
-        print(f'{len(liste)} référence(s) à trier.\nRapport : {sortie}')
-        print('Juger les cas des fichiers de suivi et écrire le rangement, puis `zc inbox planifier`.')
+    if prepare:
+        cfg.reports.mkdir(parents=True, exist_ok=True)
+        output = cfg.reports / f'inbox-{date.today():%Y-%m-%d}.md'
+        output.write_text(report, encoding='utf-8')
+        print(L(en=f'{len(listing)} item(s) to sort.\nReport: {output}',
+                fr=f'{len(listing)} référence(s) à trier.\nRapport : {output}'))
+        print(L(en='Judge the cases of the tracking files and write the filing, then `zc inbox plan`.',
+                fr='Juger les cas des fichiers de suivi et écrire le rangement, puis `zc inbox plan`.'))
         return 0
-    if not plan.groupes:
-        print('Rien à faire : aucune décision acceptée, aucune correction sûre pour les références à trier.')
+    if not plan.groups:
+        print(L(en='Nothing to do: no accepted decision, no certain correction for the items to sort.',
+                fr='Rien à faire : aucune décision acceptée, aucune correction sûre pour les références à trier.'))
         return 0
-    chemin = plans.ecrire(plan, cfg.plans, rapport)
-    print(f'{len(plan.groupes)} groupe(s), {plan.nb_operations} opération(s).')
-    print(f"Plan : {chemin}\nRapport : {chemin.with_suffix('.md')}")
-    if a._petit_plan_de_gestion(plan, cfg):  # D138
-        print(f'Plan de tri de moins de {cfg.ecriture.petit_plan_de_gestion} fiches, il s\'applique d\'un coup, sans '
-              f'essai ni sauvegarde récente. Relire le rapport, puis `zc appliquer {chemin} --tout`.')
+    path = plans.write(plan, cfg.plans, report)
+    print(_groups_line(plan))
+    print(_plan_paths(path))
+    if a._small_management_plan(plan, cfg):  # D138
+        print(L(en=f'Sorting plan of fewer than {cfg.writing.small_management_plan} items, it is applied at once, '
+                   f'without a trial or a recent backup. Read the report, then `zc apply {path} --all`.',
+                fr=f'Plan de tri de moins de {cfg.writing.small_management_plan} fiches, il s\'applique d\'un coup, '
+                   f'sans essai ni sauvegarde récente. Relire le rapport, puis `zc apply {path} --all`.'))
     else:
-        print(f'Relire le rapport, puis `zc appliquer {chemin} --essai`.')
+        print(_read_then_trial(path))
     return 0
 
 
-def inbox_preparer(args) -> int:
+def inbox_prepare(args) -> int:
     return _inbox(args, True)
 
 
-def inbox_planifier(args) -> int:
+def inbox_make_plan(args) -> int:
     return _inbox(args, False)
 
 
-def sauvegarder(args) -> int:
-    from zot_clean import config, sauvegarde
-    from zot_clean.ecriture import Refus
-    cfg = config.charger(args.dossier)
+def make_backup(args) -> int:
+    from zot_clean import config, backup
+    from zot_clean.api import Refusal
+    cfg = config.load(args.workspace)
     try:
-        info = sauvegarde.sauvegarder(cfg)
-    except Refus as e:
+        info = backup.make_backup(cfg)
+    except Refusal as e:
         print(e, file=sys.stderr)
         return 1
-    methode = 'clone du dossier Zotero' if info.methode == 'clone' else 'copie de la base seule'
-    print(f'Sauvegarde faite ({methode}, {info.taille / 1e6:.0f} Mo) : {info.dossier}')
+    method = (L(en='clone of the Zotero folder', fr='clone du dossier Zotero') if info.method == 'clone'
+              else L(en='copy of the database only', fr='copie de la base seule'))
+    print(L(en=f'Backup done ({method}, {info.size / 1e6:.0f} MB): {info.folder}',
+            fr=f'Sauvegarde faite ({method}, {info.size / 1e6:.0f} Mo) : {info.folder}'))
     return 0
 
 
-def _statut_plan(plan, chemin, cfg) -> None:
-    from zot_clean import appliquer as a, journal
-    faits = journal.groupes_faits(cfg.journal, plan.empreinte)
-    print(f'Plan {chemin.name} ({plan.etape}) : {len(plan.groupes)} groupe(s), {plan.nb_operations} opération(s).')
+def _plan_status(plan, path, cfg) -> None:
+    from zot_clean import apply as a, journal
+    done = journal.done_groups(cfg.journal, plan.fingerprint)
+    print(L(en=f'Plan {path.name} ({plan.step}): {len(plan.groups)} group(s), {plan.n_operations} operation(s).',
+            fr=f'Plan {path.name} ({plan.step}) : {len(plan.groups)} groupe(s), {plan.n_operations} opération(s).'))
     if plan.description:
         print(plan.description)
-    print(f"Rapport lisible : {chemin.with_suffix('.md')}")
-    if len(faits) == len(plan.groupes):
-        print('Plan entièrement appliqué.')
-    elif faits:
-        print(f'{len(faits)} groupe(s) déjà appliqué(s). Suite : `zc appliquer {chemin} --tout`.')
-    elif a._petit_plan_de_gestion(plan, cfg):
-        print(f'Rien d\'appliqué. Petit plan de tri, il s\'applique d\'un coup, sans essai, avec '
-              f'`zc appliquer {chemin} --tout`, puis vérifier avec `zc voir`.')
+    print(L(en=f"Readable report: {path.with_suffix('.md')}", fr=f"Rapport lisible : {path.with_suffix('.md')}"))
+    if len(done) == len(plan.groups):
+        print(L(en='Plan fully applied.', fr='Plan entièrement appliqué.'))
+    elif done:
+        print(L(en=f'{len(done)} group(s) already applied. Next, `zc apply {path} --all`.',
+                fr=f'{len(done)} groupe(s) déjà appliqué(s). Suite : `zc apply {path} --all`.'))
+    elif a._small_management_plan(plan, cfg):
+        print(L(en=f'Nothing applied. Small sorting plan, it is applied at once, without a trial, with '
+                   f'`zc apply {path} --all`, then check with `zc show`.',
+                fr=f'Rien d\'appliqué. Petit plan de tri, il s\'applique d\'un coup, sans essai, avec '
+                   f'`zc apply {path} --all`, puis vérifier avec `zc show`.'))
     else:
-        print(f'Rien d\'appliqué. Étape suivante : `zc appliquer {chemin} --essai` '
-              f'({min(cfg.ecriture.essai, len(plan.groupes))} groupe(s)), puis vérifier avec `zc voir`.')
+        print(L(en=f'Nothing applied. Next step, `zc apply {path} --trial` '
+                   f'({min(cfg.writing.trial, len(plan.groups))} group(s)), then check with `zc show`.',
+                fr=f'Rien d\'appliqué. Étape suivante : `zc apply {path} --trial` '
+                   f'({min(cfg.writing.trial, len(plan.groups))} groupe(s)), puis vérifier avec `zc show`.'))
 
 
-def appliquer(args) -> int:
-    from zot_clean import appliquer as a, config, ecriture, plans
-    from zot_clean.ecriture import ErreurAPI, Refus
-    cfg = config.charger(args.dossier)
-    chemin = args.plan.resolve()
-    plan = plans.charger(chemin)
-    if recents := plans.plus_recents(chemin, plan):
-        print(f'Attention. Un plan plus récent de la même étape existe ({recents[-1]}). Celui-ci a sans doute été '
-              "remplacé. Appliquer le plus récent, sauf raison de garder celui-ci.")
-    if not (args.essai or args.tout):
-        _statut_plan(plan, chemin, cfg)
+def apply_plan(args) -> int:
+    from zot_clean import apply as a, config, api, plans
+    from zot_clean.api import APIError, Refusal
+    cfg = config.load(args.workspace)
+    path = args.plan.resolve()
+    plan = plans.load(path)
+    if newer := plans.newer_plans(path, plan):
+        _warn(L(en=f'A more recent plan of the same step exists ({newer[-1]}). This one was probably replaced. '
+                   'Apply the more recent one, unless there is a reason to keep this one.',
+                fr=f'Un plan plus récent de la même étape existe ({newer[-1]}). Celui-ci a sans doute été '
+                   "remplacé. Appliquer le plus récent, sauf raison de garder celui-ci."))
+    if not (args.trial or args.all):
+        _plan_status(plan, path, cfg)
         return 0
-    from zot_clean import bbt, cles
-    if cfg.methode.cles_citation and (etat := bbt.detecter(cfg.dossier_zotero)).present and etat.regenere:
-        print(f'Attention. {cles.REGENERE}')  # chaque fiche écrite changerait de clé (D146)
+    from zot_clean import bbt, citation_keys
+    if cfg.method.use_citation_keys and (state := bbt.detect(cfg.zotero_dir)).present and state.regenerates:
+        _warn(citation_keys.regenerates())  # each record written would change key (D146)
     try:
-        bilan = a.appliquer(plan, chemin, ecriture.depuis_config(cfg), cfg, a.ESSAI if args.essai else a.TOUT)
-    except (Refus, ErreurAPI) as e:
+        outcome = a.apply_plan(plan, path, api.from_config(cfg), cfg, a.TRIAL if args.trial else a.ALL)
+    except (Refusal, APIError) as e:
         print(e, file=sys.stderr)
         return 1
-    for avert in bilan.avertissements:
-        print(f'Attention. {avert}')
-    if bilan.journal is None and bilan.restants:  # D179
-        print(f"L'essai de ce plan est déjà fait, il reste {bilan.restants} groupe(s). Vérifier l'essai avec "
-              f"`zc voir`, puis `zc appliquer {chemin} --tout`.")
+    for warn_msg in outcome.warnings:
+        _warn(warn_msg)
+    if outcome.journal is None and outcome.remaining:  # D179
+        print(L(en=f'The trial of this plan is already done, {outcome.remaining} group(s) remain. Check the trial with '
+                   f'`zc show`, then `zc apply {path} --all`.',
+                fr=f"L'essai de ce plan est déjà fait, il reste {outcome.remaining} groupe(s). Vérifier l'essai avec "
+                   f"`zc show`, puis `zc apply {path} --all`."))
         return 0
-    if bilan.journal is None:
-        print('Rien à appliquer, tous les groupes de ce plan sont déjà faits.')
+    if outcome.journal is None:
+        print(L(en='Nothing to apply, all the groups of this plan are already done.',
+                fr='Rien à appliquer, tous les groupes de ce plan sont déjà faits.'))
         return 0
-    print(f'{len(bilan.faits)} groupe(s) appliqué(s), {bilan.elements_ecrits} élément(s) modifié(s).')
-    arretes = {g: d for g, d in (bilan.conflits | bilan.erreurs).items() if g in bilan.arretes}
-    for titre, d in (('Appliqués en partie', bilan.partiels),
-                     ('Arrêtés après une partie des écritures, à vérifier', arretes),
-                     ('Conflits, laissés intacts', {g: d for g, d in bilan.conflits.items() if g not in arretes}),
-                     ('Erreurs, laissées intactes', {g: d for g, d in bilan.erreurs.items() if g not in arretes})):
+    print(L(en=f'{len(outcome.done)} group(s) applied, {outcome.items_written} element(s) modified.',
+            fr=f'{len(outcome.done)} groupe(s) appliqué(s), {outcome.items_written} élément(s) modifié(s).'))
+    stopped = {g: d for g, d in (outcome.conflicts | outcome.errors).items() if g in outcome.stopped}
+    for title, d in ((L(en='Partly applied', fr='Appliqués en partie'), outcome.partials),
+                     (L(en='Stopped after part of the writes, to check',
+                        fr='Arrêtés après une partie des écritures, à vérifier'), stopped),
+                     (L(en='Conflicts, left intact', fr='Conflits, laissés intacts'),
+                      {g: d for g, d in outcome.conflicts.items() if g not in stopped}),
+                     (L(en='Errors, left intact', fr='Erreurs, laissées intactes'),
+                      {g: d for g, d in outcome.errors.items() if g not in stopped})):
         if d:
-            print(f'{titre} :')
+            print(L(en=f'{title}:', fr=f'{title} :'))
             for g, detail in d.items():
-                print(f'  groupe {g} : {detail}')
-    print(f'Journal : {bilan.journal}')
-    touches = [op.cle for g in plan.groupes if g.id in bilan.faits or g.id in bilan.partiels
-               for op in g.operations if op.genre == 'items']
-    touches += [c for g in plan.groupes if g.id in bilan.arretes for op in g.operations
-                if op.genre == 'items' and (c := op.cle) in bilan.arretes[g.id]]
-    if touches:  # ce que l'essai a touché, pour le vérifier (D174)
-        touches = list(dict.fromkeys(touches))
-        print(f"Vérifier : zc voir {' '.join(touches[:20])}" + (f' (et {len(touches) - 20} autres)' if len(touches) > 20 else ''))
-    if bilan.restants:
-        suite = '--tout' if args.essai else '--tout (reprend là où il s\'est arrêté)'
-        print(f'{bilan.restants} groupe(s) restant(s). Vérifier l\'essai avec `zc voir`, puis `zc appliquer {chemin} {suite}`.')
-    elif args.essai and not (bilan.conflits or bilan.erreurs or bilan.partiels):
-        print("Le plan est petit, l'essai l'a appliqué en entier : `--tout` n'aura rien à faire. Vérifier avec `zc voir`.")
-    return 1 if bilan.conflits or bilan.erreurs else 0
+                print(L(en=f'  group {g}: {detail}', fr=f'  groupe {g} : {detail}'))
+    print(L(en=f'Journal: {outcome.journal}', fr=f'Journal : {outcome.journal}'))
+    touched = [op.key for g in plan.groups if g.id in outcome.done or g.id in outcome.partials
+               for op in g.operations if op.kind == 'items']
+    touched += [c for g in plan.groups if g.id in outcome.stopped for op in g.operations
+                if op.kind == 'items' and (c := op.key) in outcome.stopped[g.id]]
+    if touched:  # what the trial touched, to check it (D174)
+        touched = list(dict.fromkeys(touched))
+        print(L(en=f"Check: zc show {' '.join(touched[:20])}", fr=f"Vérifier : zc show {' '.join(touched[:20])}")
+              + (L(en=f' (and {len(touched) - 20} others)', fr=f' (et {len(touched) - 20} autres)')
+                 if len(touched) > 20 else ''))
+    if outcome.remaining:
+        follow_up = '--all' if args.trial else L(en='--all (resumes where it stopped)',
+                                                 fr='--all (reprend là où il s\'est arrêté)')
+        print(L(en=f'{outcome.remaining} group(s) remaining. Check the trial with `zc show`, then '
+                   f'`zc apply {path} {follow_up}`.',
+                fr=f'{outcome.remaining} groupe(s) restant(s). Vérifier l\'essai avec `zc show`, puis '
+                   f'`zc apply {path} {follow_up}`.'))
+    elif args.trial and not (outcome.conflicts or outcome.errors or outcome.partials):
+        print(L(en='The plan is small, the trial applied all of it: `--all` will have nothing to do. Check with '
+                   '`zc show`.',
+                fr="Le plan est petit, l'essai l'a appliqué en entier : `--all` n'aura rien à faire. Vérifier avec "
+                   "`zc show`."))
+    return 1 if outcome.conflicts or outcome.errors else 0
 
 
-def annuler(args) -> int:
-    from zot_clean import annulation, appliquer as a, config, ecriture, filtre, lecture, plans
-    from zot_clean.ecriture import ErreurAPI, Refus
-    cfg = config.charger(args.dossier)
-    journaux = annulation.journaux_vises(args.cible.resolve(), cfg)
-    client = ecriture.depuis_config(cfg)
+def undo_plan(args) -> int:
+    from zot_clean import undo, apply as a, config, api, privacy, reader, plans
+    from zot_clean.api import APIError, Refusal
+    cfg = config.load(args.workspace)
+    journals = undo.targeted_journals(args.target.resolve(), cfg)
+    client = api.from_config(cfg)
     try:
-        b = lecture.lire(cfg.base)
-        masquees = filtre.cles_masquees(b, cfg)
-    except (FileNotFoundError, lecture.SchemaInconnu):
-        b, masquees = None, None  # base illisible : toutes les fiches masquées dans le rapport (D126)
+        b = reader.read(cfg.database)
+        hidden = privacy.hidden_keys(b, cfg)
+    except (FileNotFoundError, reader.UnknownSchema):
+        b, hidden = None, None  # unreadable database: all records hidden in the report (D126)
     try:
-        if b is not None:  # base illisible : `zc appliquer`, qui la relit, refusera s'il le faut
-            a.controler_compte(client.utilisateur, b.compte)
-        plan, rapport = annulation.planifier(journaux, client, masquees)
-    except (ErreurAPI, Refus) as e:
+        if b is not None:  # unreadable database: `zc apply`, which rereads it, will refuse if need be
+            a.check_account(client.user, b.account)
+        plan, report = undo.make_plan(journals, client, hidden)
+    except (APIError, Refusal) as e:
         print(e, file=sys.stderr)
         return 1
-    if not plan.groupes:
-        print("Rien d'annulable (aucun élément écrit, ou éléments disparus).")
-        print(rapport)
+    if not plan.groups:
+        print(L(en='Nothing to undo (no element written, or elements gone).',
+                fr="Rien d'annulable (aucun élément écrit, ou éléments disparus)."))
+        print(report)
         return 1
-    chemin = plans.ecrire(plan, cfg.plans, rapport)
-    print(f"Plan d'annulation : {chemin}\nRapport : {chemin.with_suffix('.md')}")
-    print(f'Relire le rapport, puis `zc appliquer {chemin} --essai`.')
+    path = plans.write(plan, cfg.plans, report)
+    print(L(en=f"Undo plan: {path}\nReport: {path.with_suffix('.md')}",
+            fr=f"Plan d'annulation : {path}\nRapport : {path.with_suffix('.md')}"))
+    print(_read_then_trial(path))
+    if note := _decisions_kept(journals):
+        print(note)
     return 0
 
 
-def doublons_chercher(args) -> int:
-    from zot_clean import config, doublons as d, lecture
-    cfg = config.charger(args.dossier)
+# Step of a journal (stored name, D209) -> tracking file whose decisions produced its plan, command that would plan
+# them again.
+_DECIDED_STEPS = {
+    'tags': ('suivi/tags.toml', 'zc tags plan'),
+    'doublons': ('suivi/doublons.toml', 'zc duplicates plan'),
+    'pieces': ('suivi/pieces.toml', 'zc attachments plan'),
+    'identifiants': ('suivi/metadonnees.toml', 'zc metadata identifiers'),
+    'types': ('suivi/metadonnees.toml', 'zc metadata types'),
+    'completer': ('suivi/metadonnees.toml', 'zc metadata complete'),
+    'cles': ('suivi/cles.toml', 'zc citation-keys plan'),
+}
+
+
+def _decisions_kept(journals) -> str:
+    """An undo leaves the decisions of the tracking files as they were: planning the step again would redo what was
+    just undone (pilot bench, D242). Said once per step, after the undo plan."""
+    from zot_clean import journal as jl
+    steps = []
+    for path in journals:
+        lines = jl.read(path)
+        if lines and (step := lines[0].get('etape')) in _DECIDED_STEPS and step not in steps:
+            steps.append(step)
+    notes = []
+    for step in steps:
+        file, plan = _DECIDED_STEPS[step]
+        # The accept and reject commands refuse to overwrite a decision already taken (D172): it is changed by hand.
+        notes.append(L(en=f'The decisions of {file} are unchanged: `{plan}` would propose these changes again. Before '
+                          f'running it, change by hand in {file} the decision of each entry that must stay as the '
+                          'undo leaves it (a decision already taken is changed in the file, not by command).',
+                       fr=f'Les décisions de {file} ne changent pas : `{plan}` proposerait de nouveau ces changements. '
+                          f'Avant de le relancer, changer à la main dans {file} la décision de chaque entrée qui doit '
+                          "rester comme l'annulation la laisse (une décision prise se change dans le fichier, pas par "
+                          'une commande).'))
+    return '\n'.join(notes)
+
+
+def duplicates_find(args) -> int:
+    from zot_clean import config, duplicates as d, reader
+    cfg = config.load(args.workspace)
     try:
-        b = _lire_a_jour(cfg)
-    except (FileNotFoundError, lecture.SchemaInconnu) as e:
+        b = _read_up_to_date(cfg)
+    except (FileNotFoundError, reader.UnknownSchema) as e:
         print(e, file=sys.stderr)
         return 2
-    entrees = d.chercher(b, cfg)
-    surs = sum(1 for e in entrees if e.classe == d.SUR and not e.decision)
-    a_juger = sum(1 for e in entrees if e.classe == d.A_JUGER and not e.decision)
-    fusion = sum(1 for e in entrees if e.decision == d.FUSIONNER)
-    distincts = sum(1 for e in entrees if e.decision == d.DISTINCT)
-    print(f'{surs} groupe(s) sûr(s) et {a_juger} à juger sans décision, {fusion} à fusionner, '
-          f'{distincts} jugé(s) distinct(s).')
-    print(f'Groupes à lire dans {cfg.suivi / d.FICHIER}, décisions à écrire avec `zc doublons accepter` '
-          f"{'(--surs pour tous les groupes sûrs) ' if surs else ''}et `zc doublons refuser`, puis "
-          '`zc doublons planifier`.')
+    entries = d.find(b, cfg)
+    certain = sum(1 for e in entries if e.grade == d.CERTAIN and not e.decision)
+    to_judge = sum(1 for e in entries if e.grade == d.TO_JUDGE and not e.decision)
+    merge = sum(1 for e in entries if e.decision == d.MERGE)
+    distinct_sets = sum(1 for e in entries if e.decision == d.DISTINCT)
+    print(L(en=f'{certain} certain group(s) and {to_judge} to judge without a decision, {merge} to merge, '
+               f'{distinct_sets} judged distinct.',
+            fr=f'{certain} groupe(s) sûr(s) et {to_judge} à juger sans décision, {merge} à fusionner, '
+               f'{distinct_sets} jugé(s) distinct(s).'))
+    print(L(en=f'Groups to read in {cfg.tracking / d.FILE}, decisions to write with `zc duplicates accept` ',
+            fr=f'Groupes à lire dans {cfg.tracking / d.FILE}, décisions à écrire avec `zc duplicates accept` ')
+          + (L(en='(--certain for all certain groups) ', fr='(--certain pour tous les groupes sûrs) ') if certain else '')
+          + L(en='and `zc duplicates reject`, then `zc duplicates plan`.',
+              fr='et `zc duplicates reject`, puis `zc duplicates plan`.'))
     return 0
 
 
-def doublons_planifier(args) -> int:
-    from zot_clean import appliquer as a, config, doublons as d, ecriture, lecture, plans
-    from zot_clean.ecriture import ErreurAPI, Refus
-    cfg = config.charger(args.dossier)
+def duplicates_make_plan(args) -> int:
+    from zot_clean import apply as a, config, duplicates as d, api, reader, plans
+    from zot_clean.api import APIError, Refusal
+    cfg = config.load(args.workspace)
     try:
-        if avert := a.controler_synchronisation(cfg):
-            print(f'Attention. {avert}')
-        b = a.lire_a_jour(cfg, ecriture.depuis_config(cfg), _progression)
-        plan, rapport = d.planifier(cfg, ecriture.depuis_config(cfg), b)
-    except (Refus, ErreurAPI, FileNotFoundError, lecture.SchemaInconnu) as e:
+        if warn_msg := a.check_sync(cfg):
+            _warn(warn_msg)
+        b = a.read_up_to_date(cfg, api.from_config(cfg), _progress)
+        plan, report = d.make_plan(cfg, api.from_config(cfg), b)
+    except (Refusal, APIError, FileNotFoundError, reader.UnknownSchema) as e:
         print(e, file=sys.stderr)
         return 1
-    if not plan.groupes:
-        print('Aucun groupe à fusionner. Décider les groupes avec `zc doublons accepter` (--surs pour tous les '
-              'groupes sûrs).')
+    if not plan.groups:
+        print(L(en='No group to merge. Decide the groups with `zc duplicates accept` (--certain for all certain '
+                   'groups).',
+                fr='Aucun groupe à fusionner. Décider les groupes avec `zc duplicates accept` (--certain pour tous '
+                   'les groupes sûrs).'))
         return 0
-    chemin = plans.ecrire(plan, cfg.plans, rapport)
-    print(f'{len(plan.groupes)} groupe(s) à fusionner, {plan.nb_operations} opération(s).')
-    if avert := d.avertissement(b, cfg, plan):  # fichiers pas encore téléchargés (D168)
-        print(f'Attention. {avert}')
-    print(f"Plan : {chemin}\nRapport : {chemin.with_suffix('.md')}")
-    print(f'Relire le rapport, puis `zc appliquer {chemin} --essai`.')
+    path = plans.write(plan, cfg.plans, report)
+    print(L(en=f'{len(plan.groups)} group(s) to merge, {plan.n_operations} operation(s).',
+            fr=f'{len(plan.groups)} groupe(s) à fusionner, {plan.n_operations} opération(s).'))
+    if warn_msg := d.warning(b, cfg, plan):  # files not yet downloaded (D168)
+        _warn(warn_msg)
+    print(_plan_paths(path))
+    print(_read_then_trial(path))
     return 0
 
 
-def doublons_decider(args) -> int:
-    """`zc doublons accepter` (fusionner) et `zc doublons refuser` (distinct), D177."""
-    from zot_clean import config, doublons as d
-    cfg = config.charger(args.dossier)
-    refuser = args.action_suivi == 'refuser'
-    cles = [k.upper() for k in args.cles]
-    surs, conserver = getattr(args, 'surs', False), [k.upper() for k in getattr(args, 'conserver', [])]
-    if not (cles or surs or conserver):
-        raise SystemExit('Donner la clé d\'une fiche de chaque groupe' + ('.' if refuser else ', ou --surs.'))
-    entrees = d.charger_suivi(cfg)
-    if refuser:
-        fusion, distincts = d.decider(entrees, distinct=cles, raison=args.raison or '')
+def duplicates_decide(args) -> int:
+    """`zc duplicates accept` (merge) and `zc duplicates reject` (distinct), D177."""
+    from zot_clean import config, duplicates as d
+    cfg = config.load(args.workspace)
+    reject = args.tracking_action == 'reject'
+    keys = [k.upper() for k in args.keys]
+    certain, keep = getattr(args, 'certain', False), [k.upper() for k in getattr(args, 'keep', [])]
+    if not (keys or certain or keep):
+        raise SystemExit(L(en='Give the key of one item of each group', fr='Donner la clé d\'une fiche de chaque groupe')
+                         + ('.' if reject else L(en=', or --certain.', fr=', ou --certain.')))
+    entries = d.load_tracking(cfg)
+    if reject:
+        merge, distinct_sets, taken_out = d.decide(entries, distinct=keys, reason=args.reason or '')
     else:
-        fusion, distincts = d.decider(entrees, surs, cles, conserver=conserver,
-                                      sauf=[k.upper() for k in args.sauf])
-    d.ecrire_suivi(cfg, entrees, _lire_a_jour(cfg))
-    print(f'{fusion} groupe(s) à fusionner, {distincts} jugé(s) distinct(s), dans {cfg.suivi / d.FICHIER}. Lancer '
-          '`zc doublons planifier` pour obtenir le plan.')
+        merge, distinct_sets, taken_out = d.decide(entries, certain, keys, keep=keep,
+                                                   except_=[k.upper() for k in args.except_])
+    d.write_tracking(cfg, entries, _read_up_to_date(cfg))
+    counts = []
+    if merge:
+        counts.append(plural(merge, en='group', fr='groupe') + L(en=' to merge', fr=' à fusionner'))
+    if taken_out:  # --except on a designated group: each item judged distinct from the rest
+        counts.append(L(en='1 item taken out of its group and judged distinct from the rest',
+                        fr='1 fiche retirée de son groupe et jugée distincte du reste') if taken_out == 1 else
+                      L(en=f'{taken_out} items taken out of their group and judged distinct from the rest',
+                        fr=f'{taken_out} fiches retirées de leur groupe et jugées distinctes du reste'))
+    if distinct_sets:
+        counts.append(plural(distinct_sets, en='group judged distinct', fr='groupe jugé distinct',
+                             en_plural='groups judged distinct'))
+    print(_decisions_written(cfg.tracking / d.FILE, counts,
+                             L(en='Run `zc duplicates plan` to get the plan.',
+                               fr='Lancer `zc duplicates plan` pour obtenir le plan.')))
     return 0
 
 
-def pieces_chercher(args) -> int:
-    from zot_clean import config, lecture, pieces as p
-    cfg = config.charger(args.dossier)
+def _decisions_written(path, counts: list[str], follow_up: str) -> str:
+    """What a decision command has just written in a tracking file, and only that: the counts are those of the
+    command, not the totals of the file (pilot bench)."""
+    if not counts:
+        return L(en=f'No new decision written to {path}. {follow_up}',
+                 fr=f'Aucune décision nouvelle écrite dans {path}. {follow_up}')
+    listed = ', '.join(counts)
+    return L(en=f'Decisions written by this command to {path}: {listed}. {follow_up}',
+             fr=f'Décisions écrites par cette commande dans {path} : {listed}. {follow_up}')
+
+
+def attachments_find(args) -> int:
+    from zot_clean import config, reader, attachments as p
+    cfg = config.load(args.workspace)
     try:
-        b = _lire_a_jour(cfg)
-    except (FileNotFoundError, lecture.SchemaInconnu) as e:
+        b = _read_up_to_date(cfg)
+    except (FileNotFoundError, reader.UnknownSchema) as e:
         print(e, file=sys.stderr)
         return 2
-    entrees = p.chercher(b, cfg)
-    a_juger = sum(1 for e in entrees if not e.decision)
-    print(f'{len(entrees)} PDF présent(s) en plusieurs copies, dont {a_juger} sans décision.')
-    if avert := p.avertissement(b, cfg, entrees):  # fichiers absents (D168), doublons révélés par un PDF
-        print(f'Attention. {avert}')
-    print(f'Groupes à lire dans {cfg.suivi / p.FICHIER}, décisions à écrire avec `zc pieces accepter` et '
-          '`zc pieces refuser`, puis `zc pieces planifier`.')
+    entries = p.find(b, cfg)
+    to_judge = sum(1 for e in entries if not e.decision)
+    print(L(en=f'{len(entries)} PDF(s) present in several copies, {to_judge} of them without a decision.',
+            fr=f'{len(entries)} PDF présent(s) en plusieurs copies, dont {to_judge} sans décision.'))
+    if warn_msg := p.warning(b, cfg, entries):  # missing files (D168), duplicates revealed by a PDF
+        _warn(warn_msg)
+    print(L(en=f'Groups to read in {cfg.tracking / p.FILE}, decisions to write with `zc attachments accept` and '
+               '`zc attachments reject`, then `zc attachments plan`.',
+            fr=f'Groupes à lire dans {cfg.tracking / p.FILE}, décisions à écrire avec `zc attachments accept` et '
+               '`zc attachments reject`, puis `zc attachments plan`.'))
     return 0
 
 
-def pieces_decider(args) -> int:
-    """`zc pieces accepter` (appliquer) et `zc pieces refuser` (garder), D177."""
-    from zot_clean import config, pieces as p
-    cfg = config.charger(args.dossier)
-    entrees = p.charger(cfg)
-    b = _lire_a_jour(cfg)
-    if args.action_suivi == 'refuser':
-        appliques, gardes = p.decider(entrees, b, garder=[k.upper() for k in args.copies], raison=args.raison or '')
+def attachments_decide(args) -> int:
+    """`zc attachments accept` (apply) and `zc attachments reject` (keep), D177."""
+    from zot_clean import config, attachments as p
+    cfg = config.load(args.workspace)
+    entries = p.load(cfg)
+    b = _read_up_to_date(cfg)
+    if args.tracking_action == 'reject':
+        applied, keepers = p.decide(entries, b, keep=[k.upper() for k in args.copies], reason=args.reason or '')
     else:
-        rattacher = {}
-        for texte in args.rattacher:
-            copie, _, fiche = texte.partition('=')
-            if not copie.strip() or not fiche.strip():
-                raise SystemExit(f'« {texte} » : écrire COPIE=FICHE (clé de la copie, clé de la bonne fiche).')
-            rattacher[copie.strip().upper()] = fiche.strip().upper()
-        if not args.corbeille and not rattacher:
-            raise SystemExit('Donner les copies à mettre à la corbeille (--corbeille) ou à rattacher (--rattacher).')
-        appliques, gardes = p.decider(entrees, b, [k.upper() for k in args.corbeille], rattacher,
-                                      raison=args.raison or '')
-    p.ecrire(cfg, entrees, b)
-    print(f'{appliques} groupe(s) à appliquer, {gardes} gardé(s), dans {cfg.suivi / p.FICHIER}. Lancer '
-          '`zc pieces planifier` pour obtenir le plan.')
+        move = {}
+        for text in args.move:
+            copy, _, item = text.partition('=')
+            if not copy.strip() or not item.strip():
+                raise SystemExit(L(en=f'“{text}”: write COPY=ITEM (key of the copy, key of the right item).',
+                                   fr=f'« {text} » : écrire COPIE=FICHE (clé de la copie, clé de la bonne fiche).'))
+            move[copy.strip().upper()] = item.strip().upper()
+        if not args.trash and not move:
+            raise SystemExit(L(en='Give the copies to move to the trash (--trash) or to another item (--move).',
+                               fr='Donner les copies à mettre à la corbeille (--trash) ou à rattacher (--move).'))
+        applied, keepers = p.decide(entries, b, [k.upper() for k in args.trash], move,
+                                      reason=args.reason or '')
+    p.write(cfg, entries, b)
+    counts = []
+    if applied:
+        counts.append(plural(applied, en='group', fr='groupe') + L(en=' to apply', fr=' à appliquer'))
+    if keepers:
+        counts.append(plural(keepers, en='group kept as is', fr='groupe gardé tel quel',
+                             en_plural='groups kept as is'))
+    print(_decisions_written(cfg.tracking / p.FILE, counts,
+                             L(en='Run `zc attachments plan` to get the plan.',
+                               fr='Lancer `zc attachments plan` pour obtenir le plan.')))
     return 0
 
 
-def pieces_planifier(args) -> int:
-    from zot_clean import appliquer as a, config, ecriture, lecture, pieces as p, plans
-    from zot_clean.ecriture import ErreurAPI, Refus
-    cfg = config.charger(args.dossier)
+def attachments_make_plan(args) -> int:
+    from zot_clean import apply as a, config, api, reader, attachments as p, plans
+    from zot_clean.api import APIError, Refusal
+    cfg = config.load(args.workspace)
     try:
-        if avert := a.controler_synchronisation(cfg):
-            print(f'Attention. {avert}')
-        b = a.lire_a_jour(cfg, ecriture.depuis_config(cfg), _progression)
-        plan, rapport = p.planifier(cfg, ecriture.depuis_config(cfg), b)
-    except (Refus, ErreurAPI, FileNotFoundError, lecture.SchemaInconnu) as e:
+        if warn_msg := a.check_sync(cfg):
+            _warn(warn_msg)
+        b = a.read_up_to_date(cfg, api.from_config(cfg), _progress)
+        plan, report = p.make_plan(cfg, api.from_config(cfg), b)
+    except (Refusal, APIError, FileNotFoundError, reader.UnknownSchema) as e:
         print(e, file=sys.stderr)
         return 1
-    if not plan.groupes:
-        print('Rien à faire. Décider les groupes avec `zc pieces accepter` (--corbeille, --rattacher).')
+    if not plan.groups:
+        print(L(en='Nothing to do. Decide the groups with `zc attachments accept` (--trash, --move).',
+                fr='Rien à faire. Décider les groupes avec `zc attachments accept` (--trash, --move).'))
         return 0
-    chemin = plans.ecrire(plan, cfg.plans, rapport)
-    print(f'{len(plan.groupes)} groupe(s), {plan.nb_operations} opération(s).')
-    print(f"Plan : {chemin}\nRapport : {chemin.with_suffix('.md')}")
-    print(f'Relire le rapport, puis `zc appliquer {chemin} --essai`.')
+    path = plans.write(plan, cfg.plans, report)
+    print(_groups_line(plan))
+    print(_plan_paths(path))
+    print(_read_then_trial(path))
     return 0
 
 
-def _metadonnees(args, sous_etape: str) -> int:
-    from zot_clean import appliquer as a, config, ecriture, lecture, metadonnees as m, plans, sources
-    from zot_clean.ecriture import ErreurAPI, Refus
-    cfg = config.charger(args.dossier)
-    if not cfg.sources.contact and sous_etape == 'identifiants':
-        print('Attention. Aucune adresse de contact dans config.toml ([sources] contact). Crossref et OpenAlex '
-              "répondent plus lentement aux requêtes anonymes. Pour les accélérer, y écrire l'adresse électronique de "
-              "l'utilisateur, qui n'est transmise qu'à ces deux services. C'est facultatif, la commande continue.")
+def _metadata(args, substep: str) -> int:
+    from zot_clean import apply as a, config, api, reader, metadata as m, plans, sources
+    from zot_clean.api import APIError, Refusal
+    cfg = config.load(args.workspace)
     try:
-        if avert := a.controler_synchronisation(cfg):
-            print(f'Attention. {avert}')
-        b = a.lire_a_jour(cfg, ecriture.depuis_config(cfg), _progression)
-        services = sources.depuis_config(cfg, args.rafraichir)
-        client = ecriture.depuis_config(cfg)
-        if sous_etape == m.TYPES:
-            plan, rapport = m.types(b, cfg, services, client, lecture.lire_types(cfg.base), m.afficher_progression)
+        if warn_msg := a.check_sync(cfg):
+            _warn(warn_msg)
+        b = a.read_up_to_date(cfg, api.from_config(cfg), _progress)
+        services = sources.from_config(cfg, args.refresh)
+        client = api.from_config(cfg)
+        if substep == m.TYPES:
+            plan, report = m.types(b, cfg, services, client, reader.read_types(cfg.database), m.show_progress)
         else:
-            fonction = m.identifiants if sous_etape == m.IDENTIFIANTS else m.completer
-            plan, rapport = fonction(b, cfg, services, client, m.afficher_progression)
-        for avert in services.avertissements():
-            print(f'Attention. {avert}')
-    except (Refus, ErreurAPI, FileNotFoundError, lecture.SchemaInconnu) as e:
+            func = m.identifiers if substep == m.IDENTIFIERS else m.fill_in
+            plan, report = func(b, cfg, services, client, m.show_progress)
+        for warn_msg in services.warnings():
+            _warn(warn_msg)
+    except (Refusal, APIError, FileNotFoundError, reader.UnknownSchema) as e:
         print(e, file=sys.stderr)
         return 1
-    a_juger = sum(1 for c in m.charger_suivi(cfg) if c.sous_etape == sous_etape and not c.decision)
-    if a_juger:
-        print(f'{a_juger} cas à juger dans {cfg.suivi / m.FICHIER}, à décider avec `zc metadonnees accepter` et '
-              '`zc metadonnees refuser`.')
-    if not plan.groupes:
-        print('Aucune fiche à modifier pour le moment.')
+    to_judge = sum(1 for c in m.load_tracking(cfg) if c.substep == substep and not c.decision)
+    if to_judge:
+        print(L(en=f'{to_judge} case(s) to judge in {cfg.tracking / m.FILE}, to decide with `zc metadata accept` and '
+                   '`zc metadata reject`.',
+                fr=f'{to_judge} cas à juger dans {cfg.tracking / m.FILE}, à décider avec `zc metadata accept` et '
+                   '`zc metadata reject`.'))
+    if not plan.groups:
+        print(L(en='No item to modify for the moment.', fr='Aucune fiche à modifier pour le moment.'))
         return 0
-    chemin = plans.ecrire(plan, cfg.plans, rapport)
-    print(f'{len(plan.groupes)} fiche(s) à modifier.\nPlan : {chemin}\nRapport : {chemin.with_suffix(".md")}')
-    print(f'Relire le rapport, puis `zc appliquer {chemin} --essai`.')
+    path = plans.write(plan, cfg.plans, report)
+    print(L(en=f'{len(plan.groups)} item(s) to modify.', fr=f'{len(plan.groups)} fiche(s) à modifier.'))
+    print(_plan_paths(path))
+    print(_read_then_trial(path))
     return 0
 
 
-def metadonnees_identifiants(args) -> int:
-    return _metadonnees(args, 'identifiants')
+def metadata_identifiers(args) -> int:
+    return _metadata(args, 'identifiants')
 
 
-def metadonnees_types(args) -> int:
-    return _metadonnees(args, 'types')
+def metadata_types(args) -> int:
+    return _metadata(args, 'types')
 
 
-def metadonnees_completer(args) -> int:
-    return _metadonnees(args, 'completer')
+def metadata_complete(args) -> int:
+    return _metadata(args, 'completer')
 
 
 
-def _decision(texte: str) -> tuple[str, int | None]:
-    cle, _, choix = texte.partition('=')
-    if choix and not choix.isdigit():
-        raise SystemExit(f'« {texte} » : écrire la clé seule, ou CLÉ=numéro de la proposition.')
-    cle, _, probleme = cle.strip().partition(':')
-    return cle.upper() + (f':{probleme}' if probleme else ''), int(choix) if choix else None
+def _decision(text: str) -> tuple[str, int | None]:
+    key, _, selection = text.partition('=')
+    if selection and not selection.isdigit():
+        raise SystemExit(L(en=f'“{text}”: write the key alone, or KEY=number of the proposal.',
+                           fr=f'« {text} » : écrire la clé seule, ou CLÉ=numéro de la proposition.'))
+    key, _, problem = key.strip().partition(':')
+    return key.upper() + (f':{problem}' if problem else ''), int(selection) if selection else None
 
 
-def metadonnees_decider(args) -> int:
-    from zot_clean import config, metadonnees as m
-    cfg = config.charger(args.dossier)
-    cas = m.charger_suivi(cfg)
-    refuser = args.action_suivi == 'refuser'
-    if not refuser and not args.cles and not args.evidents:
-        raise SystemExit('Donner des clés de fiches (CLÉ ou CLÉ=numéro), ou --evidents.')
-    decisions = [_decision(t) for t in args.cles]
-    if refuser:
-        acceptes, refuses = m.decider(cas, refuser=[k for k, _ in decisions])
+def metadata_decide(args) -> int:
+    from zot_clean import config, metadata as m
+    cfg = config.load(args.workspace)
+    cases = m.load_tracking(cfg)
+    reject = args.tracking_action == 'reject'
+    if not reject and not args.keys and not args.obvious:
+        raise SystemExit(L(en='Give item keys (KEY or KEY=number), or --obvious.',
+                           fr='Donner des clés de fiches (CLÉ ou CLÉ=numéro), ou --obvious.'))
+    decisions = [_decision(t) for t in args.keys]
+    if reject:
+        accepted, rejected = m.decide(cases, reject=[k for k, _ in decisions])
     else:
-        acceptes, refuses = m.decider(cas, args.evidents, dict(decisions), sauf={k.upper() for k in args.sauf})
-    m.ecrire_suivi(cfg, cas, _lire_a_jour(cfg))
-    print(f'{acceptes} cas accepté(s), {refuses} refusé(s), dans {cfg.suivi / m.FICHIER}. Relancer la sous-étape '
-          'pour obtenir le plan.')
+        accepted, rejected = m.decide(cases, args.obvious, dict(decisions), except_={k.upper() for k in args.except_})
+    m.write_tracking(cfg, cases, _read_up_to_date(cfg))
+    counts = []
+    if accepted:
+        counts.append(plural(accepted, en='case accepted', fr='cas accepté', en_plural='cases accepted'))
+    if rejected:
+        counts.append(plural(rejected, en='case rejected', fr='cas refusé', en_plural='cases rejected'))
+    print(_decisions_written(cfg.tracking / m.FILE, counts,
+                             L(en='Run the substep again to get the plan.',
+                               fr='Relancer la sous-étape pour obtenir le plan.')))
     return 0
 
-def fonds_inventaire(args) -> int:
-    from zot_clean import config, fonds as f, lecture
-    cfg = config.charger(args.dossier)
-    if motif := f.refus(cfg):
-        print(motif, file=sys.stderr)
+def subjects_inventory(args) -> int:
+    from zot_clean import config, subjects as f, reader
+    cfg = config.load(args.workspace)
+    if cause := f.refusal(cfg):
+        print(cause, file=sys.stderr)
         return 1
     try:
-        b = lecture.lire(cfg.base)
-    except (FileNotFoundError, lecture.SchemaInconnu) as e:
+        b = _read_up_to_date(cfg)  # D171, D240
+    except (FileNotFoundError, reader.UnknownSchema) as e:
         print(e, file=sys.stderr)
         return 2
-    f.suivre_racines(cfg)
-    rapport, suivi, nouvelles, disparues = f.inventaire(b, cfg)
-    f.ecrire_suivi(cfg, suivi)
-    cfg.rapports.mkdir(parents=True, exist_ok=True)
-    sortie = cfg.rapports / f'fonds-inventaire-{date.today():%Y-%m-%d}.md'
-    sortie.write_text(rapport, encoding='utf-8')
-    sans_sort = sum(1 for c in suivi.collections if not c.sort)
-    print(f'{len(suivi.collections)} ancienne(s) collection(s), dont {sans_sort} sans sort.')
-    if disparues:
-        print(f'{len(disparues)} collection(s) disparue(s) depuis le dernier inventaire, retirée(s) de '
-              f'suivi/{f.FICHIER} : ' + ', '.join(c.chemin for c in disparues) + '.')
-    print(f'Inventaire : {sortie}\nCorrespondance à remplir : {cfg.suivi / f.FICHIER}')
-    print(f'Plan à écrire dans {cfg.dossier_travail / f.PLAN}, puis `zc fonds valider`.')
+    f.track_roots(cfg)
+    report, tracking, new_ones, vanished = f.inventory(b, cfg)
+    f.write_tracking(cfg, tracking)
+    cfg.reports.mkdir(parents=True, exist_ok=True)
+    output = cfg.reports / f'fonds-inventaire-{date.today():%Y-%m-%d}.md'
+    output.write_text(report, encoding='utf-8')
+    no_action = sum(1 for c in tracking.collections if not c.action)
+    print(L(en=f'{len(tracking.collections)} old collection(s), {no_action} of them without a fate.',
+            fr=f'{len(tracking.collections)} ancienne(s) collection(s), dont {no_action} sans sort.'))
+    if vanished:
+        print(L(en=f'{len(vanished)} collection(s) gone since the last inventory, removed from suivi/{f.FILE}: ',
+                fr=f'{len(vanished)} collection(s) disparue(s) depuis le dernier inventaire, retirée(s) de '
+                   f'suivi/{f.FILE} : ') + ', '.join(c.path for c in vanished) + '.')
+    print(L(en=f'Inventory: {output}\nCorrespondence to fill in: {cfg.tracking / f.FILE}',
+            fr=f'Inventaire : {output}\nCorrespondance à remplir : {cfg.tracking / f.FILE}'))
+    print(L(en=f'Outline to write in {cfg.workspace / f.OUTLINE}, then `zc subjects validate`.',
+            fr=f'Plan à écrire dans {cfg.workspace / f.OUTLINE}, puis `zc subjects validate`.'))
     return 0
 
 
-def fonds_valider(args) -> int:
-    from zot_clean import config, fonds as f
-    cfg = config.charger(args.dossier)
-    if motif := f.refus(cfg):
-        print(motif, file=sys.stderr)
+def subjects_validate(args) -> int:
+    from zot_clean import config, subjects as f
+    cfg = config.load(args.workspace)
+    if cause := f.refusal(cfg):
+        print(cause, file=sys.stderr)
         return 1
-    if n := f.suivre_racines(cfg):
-        print(f'Nouveaux noms des racines reportés dans {cfg.suivi / f.FICHIER} ({n} collection(s)).')
-    k = f.controler(cfg)
-    for e in k.erreurs:
-        print(f'Erreur. {e}')
-    for a in k.avertissements:
-        print(f'Attention. {a}')
-    if k.changements:
-        print('Changements depuis la dernière validation :')
-        for c in k.changements:
+    if n := f.track_roots(cfg):
+        print(L(en=f'New names of the roots carried over to {cfg.tracking / f.FILE} ({n} collection(s)).',
+                fr=f'Nouveaux noms des racines reportés dans {cfg.tracking / f.FILE} ({n} collection(s)).'))
+    k = f.check(cfg)
+    for e in k.errors:
+        _error(e)
+    for a in k.warnings:
+        _warn(a)
+    if k.changes:
+        print(L(en='Changes since the last validation:', fr='Changements depuis la dernière validation :'))
+        for c in k.changes:
             print(f'  {c}')
-    if k.erreurs:
-        print(f'{len(k.erreurs)} erreur(s) à corriger avant de valider le plan.')
+    if k.errors:
+        print(L(en=f'{len(k.errors)} error(s) to correct before validating the outline.',
+                fr=f'{len(k.errors)} erreur(s) à corriger avant de valider le plan.'))
         return 1
-    if k.deja_valide:
-        print('Plan valide, et déjà validé tel quel.')
+    if k.already_validated:
+        print(L(en='Outline valid, and already validated as it is.', fr='Plan valide, et déjà validé tel quel.'))
         return 0
-    if not args.enregistrer:
-        print("Plan sans erreur. Une fois que l'utilisateur l'a approuvé, `zc fonds valider --enregistrer`.")
+    if not args.save:
+        print(L(en='Outline without errors. Once the user has approved it, `zc subjects validate --save`.',
+                fr="Plan sans erreur. Une fois que l'utilisateur l'a approuvé, `zc subjects validate --save`."))
         return 0
-    f.enregistrer(cfg, k)
-    print(f'Plan validé, empreinte enregistrée dans {cfg.suivi / f.VALIDATION}.')
+    f.save(cfg, k)
+    print(L(en=f'Outline validated, fingerprint saved in {cfg.tracking / f.VALIDATION}.',
+            fr=f'Plan validé, empreinte enregistrée dans {cfg.tracking / f.VALIDATION}.'))
     return 0
 
 
-def fonds_suivre(args) -> int:
-    from zot_clean import config, controle as k, fonds as f, lecture
-    cfg = config.charger(args.dossier)
-    if motif := f.refus(cfg):
-        print(motif, file=sys.stderr)
+def subjects_track(args) -> int:
+    from zot_clean import config, checkup as k, subjects as f, reader
+    cfg = config.load(args.workspace)
+    if cause := f.refusal(cfg):
+        print(cause, file=sys.stderr)
         return 1
     try:
-        b = lecture.lire(cfg.base)
-    except (FileNotFoundError, lecture.SchemaInconnu) as e:
+        b = _read_up_to_date(cfg)  # D171, D240
+    except (FileNotFoundError, reader.UnknownSchema) as e:
         print(e, file=sys.stderr)
         return 2
-    s = k.suivre(b, cfg)
+    s = k.track(b, cfg)
     if s is None:
-        print(f"Rien à suivre, {f.PLAN} ou la racine « {cfg.methode.fonds} » manque.", file=sys.stderr)
+        print(L(en=f'Nothing to track, {f.OUTLINE} or the root “{cfg.method.subjects}” is missing.',
+                fr=f"Rien à suivre, {f.OUTLINE} ou la racine « {cfg.method.subjects} » manque."), file=sys.stderr)
         return 1
-    for c in s.ignores:
-        print(f'Laissé de côté (au-delà de {cfg.methode.profondeur_max} niveaux, ou parent introuvable) : {c}')
-    if not s.lignes:
-        print(f'{f.PLAN} suit déjà Zotero, aucun thème créé, renommé, déplacé ou supprimé à la main.')
+    for c in s.ignored:
+        print(L(en=f'Left aside (beyond {cfg.method.max_depth} levels, or parent not found): {c}',
+                fr=f'Laissé de côté (au-delà de {cfg.method.max_depth} niveaux, ou parent introuvable) : {c}'))
+    if not s.lines:
+        print(L(en=f'{f.OUTLINE} already follows Zotero, no theme created, renamed, moved or deleted by hand.',
+                fr=f'{f.OUTLINE} suit déjà Zotero, aucun thème créé, renommé, déplacé ou supprimé à la main.'))
         return 0
-    print(f'Changements faits dans Zotero, à reporter dans {f.PLAN} :')
-    for l in s.lignes:
+    print(L(en=f'Changes made in Zotero, to carry over to {f.OUTLINE}:',
+            fr=f'Changements faits dans Zotero, à reporter dans {f.OUTLINE} :'))
+    for l in s.lines:
         print(f'  {l}')
-    if not args.enregistrer:
-        print("Une fois que l'utilisateur les a approuvés, `zc fonds suivre --enregistrer`.")
+    if not args.save:
+        print(L(en='Once the user has approved them, `zc subjects track --save`.',
+                fr="Une fois que l'utilisateur les a approuvés, `zc subjects track --save`."))
         return 0
-    for l in k.reporter(b, cfg, s):
-        print(f'Retiré : {l}')
-    controle = f.controler(cfg)
-    for e in controle.erreurs:
-        print(f'Erreur. {e}')
-    if controle.erreurs:
-        print(f'{f.PLAN} mis à jour, mais la validation a échoué. Corriger, puis `zc fonds valider --enregistrer`.')
+    for l in k.apply_changes(b, cfg, s):
+        print(L(en=f'Removed: {l}', fr=f'Retiré : {l}'))
+    check = f.check(cfg)
+    for e in check.errors:
+        _error(e)
+    if check.errors:
+        print(L(en=f'{f.OUTLINE} updated, but the validation failed. Correct, then `zc subjects validate --save`.',
+                fr=f'{f.OUTLINE} mis à jour, mais la validation a échoué. Corriger, puis '
+                   f'`zc subjects validate --save`.'))
         return 1
-    f.enregistrer(cfg, controle)
-    vu = k.examiner(b, cfg)
-    if vu:
-        k.ecrire_memoire(cfg, vu[2].memoire)
-    print(f'{f.PLAN} et les fichiers de suivi mis à jour, plan validé.')
-    if s.ajoutes:
-        print(f'Définitions à écrire dans {f.PLAN} : ' + ', '.join(s.ajoutes) + '. Puis `zc fonds valider --enregistrer`.')
+    f.save(cfg, check)
+    seen = k.review(b, cfg)
+    if seen:
+        k.write_memory(cfg, seen[2].memory)
+    print(L(en=f'{f.OUTLINE} and the tracking files updated, outline validated.',
+            fr=f'{f.OUTLINE} et les fichiers de suivi mis à jour, plan validé.'))
+    if s.added:
+        print(L(en=f'Definitions to write in {f.OUTLINE}: ', fr=f'Définitions à écrire dans {f.OUTLINE} : ')
+              + ', '.join(s.added)
+              + L(en='. Then `zc subjects validate --save`.', fr='. Puis `zc subjects validate --save`.'))
     return 0
 
 
-def fonds_titres(args) -> int:
-    from zot_clean import config, controle as k, fonds as f, lecture
-    cfg = config.charger(args.dossier)
-    if motif := f.refus(cfg):
-        print(motif, file=sys.stderr)
+def subjects_titles(args) -> int:
+    from zot_clean import config, checkup as k, subjects as f, reader
+    cfg = config.load(args.workspace)
+    if cause := f.refusal(cfg):
+        print(cause, file=sys.stderr)
         return 1
     try:
-        b = lecture.lire(cfg.base)
-    except (FileNotFoundError, lecture.SchemaInconnu) as e:
+        b = _read_up_to_date(cfg)  # D171, D240
+    except (FileNotFoundError, reader.UnknownSchema) as e:
         print(e, file=sys.stderr)
         return 2
     try:
-        rapport, n = k.titres(b, cfg, args.chemin)
+        report, n = k.titles(b, cfg, args.path)
     except KeyError as e:
         print(e.args[0], file=sys.stderr)
         return 1
-    cfg.rapports.mkdir(parents=True, exist_ok=True)
-    nom = re.sub(r'[^\w-]+', '-', args.chemin.lower()).strip('-')
-    sortie = cfg.rapports / f'titres-{nom}-{date.today():%Y-%m-%d}.md'
-    sortie.write_text(rapport, encoding='utf-8')
-    print(f'{n} référence(s) dans « {args.chemin} » et ses sous-thèmes : {sortie}')
+    cfg.reports.mkdir(parents=True, exist_ok=True)
+    name = re.sub(r'[^\w-]+', '-', args.path.lower()).strip('-')
+    output = cfg.reports / f'titres-{name}-{date.today():%Y-%m-%d}.md'
+    output.write_text(report, encoding='utf-8')
+    print(L(en=f'{n} item(s) in “{args.path}” and its subthemes: {output}',
+            fr=f'{n} référence(s) dans « {args.path} » et ses sous-thèmes : {output}'))
     return 0
 
 
-def fonds_a_ranger(args) -> int:
-    from zot_clean import config, fonds as f, lecture, rangement as r
-    cfg = config.charger(args.dossier)
-    if motif := f.refus(cfg):
-        print(motif, file=sys.stderr)
+def subjects_pending(args) -> int:
+    from zot_clean import config, subjects as f, reader, filing as r
+    cfg = config.load(args.workspace)
+    if cause := f.refusal(cfg):
+        print(cause, file=sys.stderr)
         return 1
     try:
-        b = lecture.lire(cfg.base)
-    except (FileNotFoundError, lecture.SchemaInconnu) as e:
+        b = _read_up_to_date(cfg)  # D171, D240
+    except (FileNotFoundError, reader.UnknownSchema) as e:
         print(e, file=sys.stderr)
         return 2
-    if args.resume:
-        print(r.resume(b, cfg, args.resume))
+    if args.abstract:
+        print(r.abstract(b, cfg, args.abstract))
         return 0
-    if args.examinees:
-        for chemin, n in r.marquer_examinees(b, cfg, args.examinees).items():
-            print(f'{chemin} : {n} fiche(s) laissée(s) en place, notées dans {cfg.suivi / r.EXAMINEES}.')
-    if args.laisser:
-        cles = r.laisser(b, cfg, args.laisser)
-        print(f'{len(cles)} fiche(s) laissée(s) hors du fonds par décision, notées dans {cfg.suivi / r.LAISSEES}. '
-              'Elles reviendront si leurs collections changent.')
-    nouveau = not (cfg.suivi / r.FICHIER).is_file()
-    rapport, paquets, ajouts = r.a_ranger(b, cfg)
-    cfg.rapports.mkdir(parents=True, exist_ok=True)
-    sortie = cfg.rapports / f'fonds-a-ranger-{date.today():%Y-%m-%d}.md'
-    sortie.write_text(rapport, encoding='utf-8')
-    print(f'{sum(len(p.fiches) for p in paquets)} fiche(s) à juger en {len(paquets)} paquet(s).')
-    if ajouts:
-        print(f'{ajouts} proposition(s) tirée(s) des tags ajoutée(s) à {cfg.suivi / r.FICHIER}.')
-    print(f'Fiches : {sortie}\nDécisions à écrire dans {cfg.suivi / r.FICHIER}'
-          + (', créé avec son en-tête et un exemple' if nouveau else '') + ', puis `zc fonds planifier`.')
+    if args.reviewed:
+        for path, n in r.mark_reviewed(b, cfg, args.reviewed).items():
+            print(L(en=f'{path}: {n} item(s) left in place, noted in {cfg.tracking / r.REVIEWED}.',
+                    fr=f'{path} : {n} fiche(s) laissée(s) en place, notées dans {cfg.tracking / r.REVIEWED}.'))
+    if args.leave_out:
+        keys = r.leave_out(b, cfg, args.leave_out)
+        print(L(en=f'{len(keys)} item(s) left out of the subjects by decision, noted in {cfg.tracking / r.LEFT_OUT}. '
+                   'They will come back if their collections change.',
+                fr=f'{len(keys)} fiche(s) laissée(s) hors du fonds par décision, notées dans '
+                   f'{cfg.tracking / r.LEFT_OUT}. Elles reviendront si leurs collections changent.'))
+    new = not (cfg.tracking / r.FILE).is_file()
+    report, bundles, additions = r.pending(b, cfg)
+    cfg.reports.mkdir(parents=True, exist_ok=True)
+    output = cfg.reports / f'fonds-a-ranger-{date.today():%Y-%m-%d}.md'
+    output.write_text(report, encoding='utf-8')
+    print(L(en=f'{sum(len(p.items) for p in bundles)} item(s) to judge in {len(bundles)} bundle(s).',
+            fr=f'{sum(len(p.items) for p in bundles)} fiche(s) à juger en {len(bundles)} paquet(s).'))
+    if additions:
+        print(L(en=f'{additions} proposal(s) drawn from the tags added to {cfg.tracking / r.FILE}.',
+                fr=f'{additions} proposition(s) tirée(s) des tags ajoutée(s) à {cfg.tracking / r.FILE}.'))
+    print(L(en=f'Items: {output}\nDecisions to write in {cfg.tracking / r.FILE}',
+            fr=f'Fiches : {output}\nDécisions à écrire dans {cfg.tracking / r.FILE}')
+          + (L(en=', created with its header and an example', fr=', créé avec son en-tête et un exemple') if new else '')
+          + L(en=', then `zc subjects plan`.', fr=', puis `zc subjects plan`.'))
     return 0
 
 
-def fonds_planifier(args) -> int:
-    from zot_clean import appliquer as a, config, ecriture, fonds as f, lecture, plans, rangement as r
-    from zot_clean.ecriture import ErreurAPI, Refus
-    cfg = config.charger(args.dossier)
-    if motif := f.refus(cfg):
-        print(motif, file=sys.stderr)
+def subjects_make_plan(args) -> int:
+    from zot_clean import apply as a, config, api, subjects as f, reader, plans, filing as r
+    from zot_clean.api import APIError, Refusal
+    cfg = config.load(args.workspace)
+    if cause := f.refusal(cfg):
+        print(cause, file=sys.stderr)
         return 1
     try:
-        if avert := a.controler_synchronisation(cfg):
-            print(f'Attention. {avert}')
-        client = ecriture.depuis_config(cfg)
-        _progression('Lecture de la copie locale de Zotero et de la version du serveur.')
-        b = a.lire_a_jour(cfg, client, _progression)
-        plan, rapport = r.planifier(b, cfg, client, args.racines, _progression)
-    except (Refus, ErreurAPI, FileNotFoundError, lecture.SchemaInconnu) as e:
+        if warn_msg := a.check_sync(cfg):
+            _warn(warn_msg)
+        client = api.from_config(cfg)
+        _progress(L(en='Reading the local copy of Zotero and the server version.',
+                    fr='Lecture de la copie locale de Zotero et de la version du serveur.'))
+        b = a.read_up_to_date(cfg, client, _progress)
+        plan, report = r.make_plan(b, cfg, client, args.roots, _progress)
+    except (Refusal, APIError, FileNotFoundError, reader.UnknownSchema) as e:
         print(e, file=sys.stderr)
         return 1
-    if not plan.groupes:
-        print('Rien à ranger : la bibliothèque est dans l\'état visé par le plan et par les décisions acceptées.')
+    if not plan.groups:
+        print(L(en='Nothing to file: the library is in the state aimed at by the outline and the accepted decisions.',
+                fr='Rien à ranger : la bibliothèque est dans l\'état visé par le plan et par les décisions acceptées.'))
         return 0
-    chemin = plans.ecrire(plan, cfg.plans, rapport)
-    print(f'{len(plan.groupes)} groupe(s), {plan.nb_operations} opération(s).')
-    print(f"Plan : {chemin}\nRapport : {chemin.with_suffix('.md')}")
-    print(f'Relire le rapport, puis `zc appliquer {chemin} --essai`.')
-    if args.racines:
-        print('Après l\'application complète, reporter les nouveaux noms des racines dans config.toml et plan.md.')
+    path = plans.write(plan, cfg.plans, report)
+    print(_groups_line(plan))
+    print(_plan_paths(path))
+    print(_read_then_trial(path))
+    if args.roots:
+        print(L(en='After the full application, carry the new names of the roots over to config.toml and plan.md.',
+                fr='Après l\'application complète, reporter les nouveaux noms des racines dans config.toml et '
+                   'plan.md.'))
     return 0
 
 
-def tags_inventaire(args) -> int:
-    from zot_clean import config, lecture, tags as t
-    cfg = config.charger(args.dossier)
+def tags_inventory(args) -> int:
+    from zot_clean import config, reader, tags as t
+    cfg = config.load(args.workspace)
     try:
-        b = _lire_a_jour(cfg)
-    except (FileNotFoundError, lecture.SchemaInconnu) as e:
+        b = _read_up_to_date(cfg)
+    except (FileNotFoundError, reader.UnknownSchema) as e:
         print(e, file=sys.stderr)
         return 2
-    rapport, suivi = t.inventaire(b, cfg)
-    t.ecrire(cfg, suivi, b)
-    cfg.rapports.mkdir(parents=True, exist_ok=True)
-    sortie = cfg.rapports / f'tags-inventaire-{date.today():%Y-%m-%d}.md'
-    sortie.write_text(rapport, encoding='utf-8')
-    attente = [e for e in suivi.tags if not e.decision]
-    groupes = [g for g in suivi.variantes if not g.decision]
-    print(suivi.resume_automatiques + (f' Décision : {suivi.automatiques}.' if suivi.automatiques
-                                       else ' Règle à approuver.'))
-    if suivi.resume_importes:
-        print(suivi.resume_importes)
-    print(f'{len(attente)} tag(s) à juger (dont {sum(e.classe == t.EVIDENT for e in attente)} évident(s)), '
-          f'{len(groupes)} groupe(s) de variantes (dont {sum(g.classe == t.EVIDENT for g in groupes)} évident(s)).')
-    if suivi.a_ranger:
-        print(f'{len(suivi.a_ranger)} proposition(s) de rangement ajoutée(s) à {cfg.suivi / "rangement.toml"}.')
-    print(f'Inventaire : {sortie}\nRègles à juger : {cfg.suivi / t.FICHIER}, à décider avec `zc tags accepter` et '
-          '`zc tags refuser`, puis `zc tags planifier`.')
+    report, tracking = t.inventory(b, cfg)
+    t.write(cfg, tracking, b)
+    cfg.reports.mkdir(parents=True, exist_ok=True)
+    output = cfg.reports / f'tags-inventaire-{date.today():%Y-%m-%d}.md'
+    output.write_text(report, encoding='utf-8')
+    waiting = [e for e in tracking.tags if not e.decision]
+    groups = [g for g in tracking.variants if not g.decision]
+    print(tracking.automatic_summary + (L(en=f' Decision: {tracking.automatic}.', fr=f' Décision : {tracking.automatic}.')
+                                        if tracking.automatic else L(en=' Rule to approve.', fr=' Règle à approuver.')))
+    if tracking.imported_summary:
+        print(tracking.imported_summary)
+    print(L(en=f'{len(waiting)} tag(s) to judge ({sum(e.grade == t.OBVIOUS for e in waiting)} obvious), '
+               f'{len(groups)} group(s) of variants ({sum(g.grade == t.OBVIOUS for g in groups)} obvious).',
+            fr=f'{len(waiting)} tag(s) à juger (dont {sum(e.grade == t.OBVIOUS for e in waiting)} évident(s)), '
+               f'{len(groups)} groupe(s) de variantes (dont {sum(g.grade == t.OBVIOUS for g in groups)} évident(s)).'))
+    if tracking.pending:
+        print(L(en=f'{len(tracking.pending)} filing proposal(s) added to {cfg.tracking / "rangement.toml"}.',
+                fr=f'{len(tracking.pending)} proposition(s) de rangement ajoutée(s) à '
+                   f'{cfg.tracking / "rangement.toml"}.'))
+    print(L(en=f'Inventory: {output}\nRules to judge: {cfg.tracking / t.FILE}, to decide with `zc tags accept` and '
+               '`zc tags reject`, then `zc tags plan`.',
+            fr=f'Inventaire : {output}\nRègles à juger : {cfg.tracking / t.FILE}, à décider avec `zc tags accept` et '
+               '`zc tags reject`, puis `zc tags plan`.'))
     return 0
 
 
-def _suivi_tags(args):
-    from zot_clean import config, lecture, tags as t
-    cfg = config.charger(args.dossier)
-    if not (cfg.suivi / t.FICHIER).is_file():
-        raise SystemExit(f'Pas encore de {cfg.suivi / t.FICHIER}. Lancer d\'abord `zc tags inventaire`.')
-    return cfg, t.charger(cfg), lecture
+def _tags_tracking(args):
+    from zot_clean import config, reader, tags as t
+    cfg = config.load(args.workspace)
+    if not (cfg.tracking / t.FILE).is_file():
+        raise SystemExit(L(en=f'No {cfg.tracking / t.FILE} yet. Run `zc tags inventory` first.',
+                           fr=f'Pas encore de {cfg.tracking / t.FILE}. Lancer d\'abord `zc tags inventory`.'))
+    return cfg, t.load(cfg), reader
 
 
-def tags_decider(args) -> int:
-    """`zc tags accepter` et `zc tags refuser` (D177)."""
+def tags_decide(args) -> int:
+    """`zc tags accept` and `zc tags reject` (D177)."""
     from zot_clean import tags as t
-    cfg, suivi, lecture = _suivi_tags(args)
-    refuser = args.action_suivi == 'refuser'
-    evidents = getattr(args, 'evidents', False)
-    regles = [r for r, oui in (('automatiques', args.regle_automatiques), ('importes', args.regle_importes)) if oui]
-    if not (args.noms or args.variantes or regles or evidents):
-        raise SystemExit('Donner des noms de tags, des groupes (--variantes), une règle globale (--regle-automatiques, '
-                         '--regle-importes)' + ('.' if refuser else ', ou --evidents.'))
-    n = t.decider(suivi, cfg, t.REFUSER if refuser else t.ACCEPTER, args.noms, args.variantes, evidents,
-                  getattr(args, 'sauf', []), regles, getattr(args, 'sort', '') or '', getattr(args, 'cible', '') or '')
+    cfg, tracking, reading = _tags_tracking(args)
+    reject = args.tracking_action == 'reject'
+    obvious = getattr(args, 'obvious', False)
+    rules = [r for r, yes in (('automatiques', args.automatic_rule), ('importes', args.imported_rule)) if yes]
+    if not (args.names or args.variants or rules or obvious):
+        raise SystemExit(L(en='Give tag names, groups (--variants), a global rule (--automatic-rule, --imported-rule)',
+                           fr='Donner des noms de tags, des groupes (--variants), une règle globale '
+                              '(--automatic-rule, --imported-rule)')
+                         + ('.' if reject else L(en=', or --obvious.', fr=', ou --obvious.')))
+    n = t.decide(tracking, cfg, t.REJECT if reject else t.ACCEPT, args.names, args.variants, obvious,
+                  getattr(args, 'except_', []), rules, getattr(args, 'action', '') or '', getattr(args, 'target', '') or '')
     try:
-        b = lecture.lire(cfg.base)
-    except (FileNotFoundError, lecture.SchemaInconnu) as e:
+        b = reading.read(cfg.database)
+    except (FileNotFoundError, reading.UnknownSchema) as e:
         print(e, file=sys.stderr)
         return 2
-    t.ecrire(cfg, suivi, b)
-    print(f"{n} règle(s) {'refusée(s)' if refuser else 'acceptée(s)'} dans {cfg.suivi / t.FICHIER}. Lancer "
-          '`zc tags planifier` pour obtenir le plan.')
+    t.write(cfg, tracking, b)
+    if reject:
+        counts = [plural(n, en='rule rejected', fr='règle refusée', en_plural='rules rejected')] if n else []
+    else:
+        counts = [plural(n, en='rule accepted', fr='règle acceptée', en_plural='rules accepted')] if n else []
+    print(_decisions_written(cfg.tracking / t.FILE, counts,
+                             L(en='Run `zc tags plan` to get the plan.', fr='Lancer `zc tags plan` pour obtenir le plan.')))
     return 0
 
 
-def tags_ajouter(args) -> int:
+def tags_add(args) -> int:
     from zot_clean import tags as t
-    cfg, suivi, lecture = _suivi_tags(args)
+    cfg, tracking, reading = _tags_tracking(args)
     try:
-        b = lecture.lire(cfg.base)
-    except (FileNotFoundError, lecture.SchemaInconnu) as e:
+        b = reading.read(cfg.database)
+    except (FileNotFoundError, reading.UnknownSchema) as e:
         print(e, file=sys.stderr)
         return 2
-    n = t.ajouter(suivi, cfg, b, args.noms, args.sort, args.cible or '', args.utilisateur)
-    t.ecrire(cfg, suivi, b)
-    print(f'{n} règle(s) ajoutée(s) et acceptée(s) dans {cfg.suivi / t.FICHIER}. Lancer `zc tags planifier` pour '
-          'obtenir le plan.')
+    n = t.add(tracking, cfg, b, args.names, args.action, args.target or '', args.user)
+    t.write(cfg, tracking, b)
+    rules = plural(n, en='rule', fr='règle')
+    added = (L(en='added and accepted', fr='ajoutées et acceptées') if n > 1 else
+             L(en='added and accepted', fr='ajoutée et acceptée'))
+    print(_decisions_written(cfg.tracking / t.FILE, [f'{rules} {added}'] if n else [],
+                             L(en='Run `zc tags plan` to get the plan.', fr='Lancer `zc tags plan` pour obtenir le plan.')))
     return 0
 
 
-def tags_planifier(args) -> int:
-    from zot_clean import appliquer as a, config, ecriture, lecture, plans, tags as t
-    from zot_clean.ecriture import ErreurAPI, Refus
-    cfg = config.charger(args.dossier)
+def tags_make_plan(args) -> int:
+    from zot_clean import apply as a, config, api, reader, plans, tags as t
+    from zot_clean.api import APIError, Refusal
+    cfg = config.load(args.workspace)
     try:
-        if avert := a.controler_synchronisation(cfg):
-            print(f'Attention. {avert}')
-        client = ecriture.depuis_config(cfg)
-        b = a.lire_a_jour(cfg, client, _progression)
-        plan, rapport = t.planifier(b, cfg, client)
-    except (Refus, ErreurAPI, FileNotFoundError, lecture.SchemaInconnu) as e:
+        if warn_msg := a.check_sync(cfg):
+            _warn(warn_msg)
+        client = api.from_config(cfg)
+        b = a.read_up_to_date(cfg, client, _progress)
+        plan, report = t.make_plan(b, cfg, client)
+    except (Refusal, APIError, FileNotFoundError, reader.UnknownSchema) as e:
         print(e, file=sys.stderr)
         return 1
-    if not plan.groupes:
-        print("Rien à faire : les tags sont dans l'état visé par les règles acceptées de suivi/tags.toml.")
+    if not plan.groups:
+        print(L(en='Nothing to do: the tags are in the state aimed at by the accepted rules of suivi/tags.toml.',
+                fr="Rien à faire : les tags sont dans l'état visé par les règles acceptées de suivi/tags.toml."))
         return 0
-    chemin = plans.ecrire(plan, cfg.plans, rapport)
-    print(f'{len(plan.groupes)} groupe(s), {plan.nb_operations} opération(s).')
-    print(f"Plan : {chemin}\nRapport : {chemin.with_suffix('.md')}")
-    print(f'Relire le rapport, puis `zc appliquer {chemin} --essai`.')
+    path = plans.write(plan, cfg.plans, report)
+    print(_groups_line(plan))
+    print(_plan_paths(path))
+    print(_read_then_trial(path))
     return 0
 
 
-def cles_planifier(args) -> int:
-    from zot_clean import appliquer as a, bbt, cles as c, config, ecriture, lecture, plans
-    from zot_clean.ecriture import ErreurAPI, Refus
-    cfg = config.charger(args.dossier)
+def keys_make_plan(args) -> int:
+    from zot_clean import apply as a, bbt, citation_keys as c, config, api, reader, plans
+    from zot_clean.api import APIError, Refusal
+    cfg = config.load(args.workspace)
     try:
-        if avert := a.controler_synchronisation(cfg):
-            print(f'Attention. {avert}')
-        client = ecriture.depuis_config(cfg)
-        b = a.lire_a_jour(cfg, client, _progression)
-        etat = bbt.detecter(cfg.dossier_zotero)
-        plan, rapport = c.planifier(b, cfg, client, etat)
-    except (Refus, ErreurAPI, FileNotFoundError, lecture.SchemaInconnu) as e:
+        if warn_msg := a.check_sync(cfg):
+            _warn(warn_msg)
+        client = api.from_config(cfg)
+        b = a.read_up_to_date(cfg, client, _progress)
+        state = bbt.detect(cfg.zotero_dir)
+        plan, report = c.make_plan(b, cfg, client, state)
+    except (Refusal, APIError, FileNotFoundError, reader.UnknownSchema) as e:
         print(e, file=sys.stderr)
         return 1
-    for avert in c.avertissements(b, etat):
-        print(f'Attention. {avert}')
-    if not etat.present:
-        print("Better BibTeX n'est pas actif : seules les clés en double sont départagées.")
-    if a_juger := sum(1 for e in c.charger(cfg).extra if not e.decision):  # un double se départage seul
-        print(f'{a_juger} cas qui demandent un avis : {cfg.suivi / c.FICHIER}, à décider avec `zc cles decider`.')
-    if not plan.groupes:
-        cfg.rapports.mkdir(parents=True, exist_ok=True)
-        sortie = cfg.rapports / f'cles-{date.today():%Y-%m-%d}.md'
-        sortie.write_text(rapport, encoding='utf-8')
-        print(f"Rien à faire : aucune clé en double à départager ni ligne d'Extra à ranger. Rapport : {sortie}")
+    for warn_msg in c.warnings(b, state):
+        _warn(warn_msg)
+    if not state.present:
+        print(L(en='Better BibTeX is not active: only duplicate keys are settled.',
+                fr="Better BibTeX n'est pas actif : seules les clés en double sont départagées."))
+    if to_judge := sum(1 for e in c.load(cfg).extra if not e.decision):  # a duplicate is settled on its own
+        print(L(en=f'{to_judge} case(s) that need an opinion: {cfg.tracking / c.FILE}, to decide with '
+                   '`zc citation-keys decide`.',
+                fr=f'{to_judge} cas qui demandent un avis : {cfg.tracking / c.FILE}, à décider avec '
+                   '`zc citation-keys decide`.'))
+    if not plan.groups:
+        cfg.reports.mkdir(parents=True, exist_ok=True)
+        output = cfg.reports / f'cles-{date.today():%Y-%m-%d}.md'
+        output.write_text(report, encoding='utf-8')
+        print(L(en=f'Nothing to do: no duplicate key to settle and no Extra line to tidy. Report: {output}',
+                fr=f"Rien à faire : aucune clé en double à départager ni ligne d'Extra à ranger. Rapport : {output}"))
         return 0
-    chemin = plans.ecrire(plan, cfg.plans, rapport)
-    print(f'{len(plan.groupes)} groupe(s), {plan.nb_operations} opération(s).')
-    print(f"Plan : {chemin}\nRapport : {chemin.with_suffix('.md')}")
-    print(f'Relire le rapport, puis `zc appliquer {chemin} --essai`.')
+    path = plans.write(plan, cfg.plans, report)
+    print(_groups_line(plan))
+    print(_plan_paths(path))
+    print(_read_then_trial(path))
     return 0
 
 
-def cles_decider(args) -> int:
-    """`zc cles decider FICHE=DÉCISION …` (D177)."""
-    from zot_clean import bbt, cles as c, config, filtre
-    cfg = config.charger(args.dossier)
-    if not (cfg.suivi / c.FICHIER).is_file():
-        raise SystemExit(f'Pas de {cfg.suivi / c.FICHIER} : aucun cas ne demande d\'avis. Lancer `zc cles planifier`.')
+def keys_decide(args) -> int:
+    """`zc citation-keys decide ITEM=DECISION …` (D177). The English decision is translated into the word stored
+    in the tracking file (D209, D219)."""
+    from zot_clean import bbt, citation_keys as c, config, privacy
+    cfg = config.load(args.workspace)
+    if not (cfg.tracking / c.FILE).is_file():
+        raise SystemExit(L(en=f'No {cfg.tracking / c.FILE}: no case needs an opinion. Run `zc citation-keys plan`.',
+                           fr=f'Pas de {cfg.tracking / c.FILE} : aucun cas ne demande d\'avis. Lancer '
+                              f'`zc citation-keys plan`.'))
+    stored = {new: old for old, new in registry.VALUES['cles decider', 'decisions'].items()}
     decisions = {}
-    for texte in args.decisions:
-        fiche, _, decision = texte.partition('=')
-        if not fiche.strip() or not decision.strip():
-            raise SystemExit(f'« {texte} » : écrire FICHE=décision (garder, écarter, natif ou extra).')
-        decisions[fiche.strip().upper()] = decision
-    suivi = c.charger(cfg)
-    n = c.decider(suivi, decisions, args.raison or '')
-    b = _lire_a_jour(cfg)
-    etat = bbt.detecter(cfg.dossier_zotero)
-    c.ecrire(cfg, b, c.analyser(b, cfg, etat, suivi, avec_extra=etat.present), filtre.cles_masquees(b, cfg), suivi)
-    print(f'{n} cas décidé(s) dans {cfg.suivi / c.FICHIER}. Lancer `zc cles planifier` pour obtenir le plan.')
+    for text in args.decisions:
+        item, _, decision = text.partition('=')
+        if not item.strip() or decision.strip().lower() not in stored:
+            raise SystemExit(L(en=f'“{text}”: write ITEM=decision (keep, skip, native or extra).',
+                               fr=f'« {text} » : écrire FICHE=décision (keep, skip, native ou extra).'))
+        decisions[item.strip().upper()] = stored[decision.strip().lower()]
+    tracking = c.load(cfg)
+    n = c.decide(tracking, decisions, args.reason or '')
+    b = _read_up_to_date(cfg)
+    state = bbt.detect(cfg.zotero_dir)
+    c.write(cfg, b, c.analyze(b, cfg, state, tracking, with_extra=state.present), privacy.hidden_keys(b, cfg), tracking)
+    counts = [plural(n, en='case decided', fr='cas décidé', en_plural='cases decided')] if n else []
+    print(_decisions_written(cfg.tracking / c.FILE, counts,
+                             L(en='Run `zc citation-keys plan` to get the plan.',
+                               fr='Lancer `zc citation-keys plan` pour obtenir le plan.')))
     return 0
 
 
-def noms_planifier(args) -> int:
-    from zot_clean import appliquer as a, bbt, config, ecriture, lecture, noms as n, plans
-    from zot_clean.ecriture import ErreurAPI, Refus
-    cfg = config.charger(args.dossier)
+def filenames_make_plan(args) -> int:
+    from zot_clean import apply as a, bbt, config, api, reader, filenames as n, plans
+    from zot_clean.api import APIError, Refusal
+    cfg = config.load(args.workspace)
     try:
-        if avert := a.controler_synchronisation(cfg):
-            print(f'Attention. {avert}')
-        client = ecriture.depuis_config(cfg)
-        b = a.lire_a_jour(cfg, client, _progression)
-        stockage = bbt.stockage_fichiers(cfg.dossier_zotero)
-        # Un fichier absent n'est renommé que s'il est stocké sur zotero.org et que Zotero y synchronise (D158).
-        en_ligne, motif = (None, 'option --hors-ligne') if args.hors_ligne else (
-            _fichiers_en_ligne(cfg, b, n.absents(b), client) if stockage == bbt.ZOTERO_ORG else ({}, ''))
-        if motif:
-            print(f'Fichiers absents du disque non cherchés sur zotero.org ({motif}), ils ne seront pas renommés.')
-        plan, rapport = n.planifier(b, cfg, client, en_ligne, stockage)
-    except n.ModeleNonPrisEnCharge as e:
+        if warn_msg := a.check_sync(cfg):
+            _warn(warn_msg)
+        client = api.from_config(cfg)
+        b = a.read_up_to_date(cfg, client, _progress)
+        storage = bbt.file_storage(cfg.zotero_dir)
+        # A missing file is renamed only if it is stored on zotero.org and Zotero syncs there (D158).
+        online, cause = (None, L(en='option --offline', fr='option --offline')) if args.offline else (
+            _online_files(cfg, b, n.missing(b), client) if storage == bbt.ZOTERO_ORG else ({}, ''))
+        if cause:
+            print(L(en=f'Files missing from the disk not looked for on zotero.org ({cause}), they will not be renamed.',
+                    fr=f'Fichiers absents du disque non cherchés sur zotero.org ({cause}), ils ne seront pas '
+                       f'renommés.'))
+        plan, report = n.make_plan(b, cfg, client, online, storage)
+    except n.UnsupportedTemplate as e:
         print(e, file=sys.stderr)
         return 1
-    except (Refus, ErreurAPI, FileNotFoundError, lecture.SchemaInconnu) as e:
+    except (Refusal, APIError, FileNotFoundError, reader.UnknownSchema) as e:
         print(e, file=sys.stderr)
         return 1
-    if not plan.groupes:
-        cfg.rapports.mkdir(parents=True, exist_ok=True)
-        sortie = cfg.rapports / f'noms-{date.today():%Y-%m-%d}.md'
-        sortie.write_text(rapport, encoding='utf-8')
-        print(f'Rien à renommer : les fichiers principaux portent le nom attendu, hors cas laissés de côté.\n'
-              f'Rapport : {sortie}')
+    if not plan.groups:
+        cfg.reports.mkdir(parents=True, exist_ok=True)
+        output = cfg.reports / f'noms-{date.today():%Y-%m-%d}.md'
+        output.write_text(report, encoding='utf-8')
+        print(L(en=f'Nothing to rename: the main files have the expected name, except the cases left aside.\n'
+                   f'Report: {output}',
+                fr=f'Rien à renommer : les fichiers principaux portent le nom attendu, hors cas laissés de côté.\n'
+                   f'Rapport : {output}'))
         return 0
-    chemin = plans.ecrire(plan, cfg.plans, rapport)
-    print(f'{len(plan.groupes)} fichier(s) à renommer.')
-    print(f"Plan : {chemin}\nRapport : {chemin.with_suffix('.md')}")
-    print(f'Relire le rapport, puis `zc appliquer {chemin} --essai`, synchroniser Zotero et vérifier avec `zc voir` '
-          'que les fichiers de l\'essai portent leur nouveau nom avant `--tout`.')
+    path = plans.write(plan, cfg.plans, report)
+    print(L(en=f'{len(plan.groups)} file(s) to rename.', fr=f'{len(plan.groups)} fichier(s) à renommer.'))
+    print(_plan_paths(path))
+    print(L(en=f'Read the report, then `zc apply {path} --trial`, sync Zotero and check with `zc show` that the '
+               'files of the trial have their new name before `--all`.',
+            fr=f'Relire le rapport, puis `zc apply {path} --trial`, synchroniser Zotero et vérifier avec `zc show` '
+               'que les fichiers de l\'essai portent leur nouveau nom avant `--all`.'))
     return 0
 
 
-def voir(args) -> int:
-    from zot_clean import config, lecture, voir as v
-    if not args.cles and not args.tag:
-        print('Donner des clés de fiches, ou un tag avec --tag.', file=sys.stderr)
+def show(args) -> int:
+    from zot_clean import config, reader, show as v
+    if not args.keys and not args.tag:
+        print(L(en='Give item keys, or a tag with --tag.', fr='Donner des clés de fiches, ou un tag avec --tag.'),
+              file=sys.stderr)
         return 1
-    cfg = config.charger(args.dossier)
+    cfg = config.load(args.workspace)
     try:
-        b = _lire_a_jour(cfg)
-    except (FileNotFoundError, lecture.SchemaInconnu) as e:
+        b = _read_up_to_date(cfg)
+    except (FileNotFoundError, reader.UnknownSchema) as e:
         print(e, file=sys.stderr)
         return 2
     if args.tag:
-        print(v.decrire_tag(b, cfg, args.tag))
-    if args.cles:
-        print(v.decrire(b, cfg, args.cles))
+        print(v.describe_tag(b, cfg, args.tag))
+    if args.keys:
+        print(v.describe(b, cfg, args.keys))
     return 0
 
 
 def journal(args) -> int:
     from zot_clean import config, journal as jl
-    cfg = config.charger(args.dossier)
-    resumes = jl.tous(cfg.journal)
-    if not resumes:
-        print('Aucune écriture journalisée.')
+    cfg = config.load(args.workspace)
+    summaries = jl.all_entries(cfg.journal)
+    if not summaries:
+        print(L(en='No journaled write.', fr='Aucune écriture journalisée.'))
         return 0
-    annules = {n for r in resumes if r.termine for n in r.en_tete.get('annule', [])}
-    for r in resumes:
-        e = r.en_tete
-        statuts = list(r.groupes.values())
-        etat = 'annulé' if r.chemin.name in annules else ('terminé' if r.termine else 'interrompu')
-        conflits = sum(s in ('conflit', 'erreur') for s in statuts)
-        print(f"{r.chemin.name}  {e.get('mode', '?'):5}  {statuts.count('fait'):4} groupe(s) faits"
-              f"{f', {conflits} en conflit' if conflits else ''}, {r.elements} élément(s), {etat}")
+    undone = {n for r in summaries if r.finished for n in r.header.get('annule', [])}
+    for r in summaries:
+        e = r.header
+        statuses = list(r.groups.values())  # stored statuses (D209): « fait », « conflit », « erreur »
+        state = (L(en='undone', fr='annulé') if r.path.name in undone
+                 else L(en='finished', fr='terminé') if r.finished else L(en='interrupted', fr='interrompu'))
+        conflicts = sum(s in ('conflit', 'erreur') for s in statuses)
+        in_conflict = L(en=f', {conflicts} in conflict', fr=f', {conflicts} en conflit') if conflicts else ''
+        # Stored modes (D209) « essai » and « tout », shown with the names of the options.
+        mode = {'essai': L(en='trial', fr='essai'), 'tout': L(en='all', fr='tout')}.get(e.get('mode', '?'), e.get('mode', '?'))
+        print(L(en=f"{r.path.name}  {mode:5}  {statuses.count('fait'):4} group(s) done"
+                   f"{in_conflict}, {r.all_items} element(s), {state}",
+                fr=f"{r.path.name}  {mode:5}  {statuses.count('fait'):4} groupe(s) faits"
+                   f"{in_conflict}, {r.all_items} élément(s), {state}"))
     return 0
 
 
-def analyseur() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog='zc', description="Mettre et garder de l'ordre dans sa bibliothèque Zotero.")
+def _stored_value(table: dict[str, str]):
+    """Argument type of an option whose English value (D219) is translated into the word stored in the working
+    folder (D209), which the modules expect."""
+    stored = {new: old for old, new in table.items()}
+
+    def value(text: str) -> str:
+        if (word := text.strip().lower()) in stored:
+            return stored[word]
+        raise argparse.ArgumentTypeError(f"invalid choice: {text!r} (choose from {', '.join(stored)})")
+    return value
+
+
+def _workspace(parser, help_text: str = 'working folder (by default, the one that contains config.toml)') -> None:
+    # `dest` stays `folder`, the name `run_command` reads for every command, `zc init` included.
+    parser.add_argument('--workspace', type=path, help=help_text)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Commands, subcommands and options in English, as `registry.py` names them (D219). Help in English only
+    (D215)."""
+    p = argparse.ArgumentParser(prog='zc', description='Put and keep order in your Zotero library.')
     p.add_argument('--version', action='version', version=f'zot-clean {__version__}')
-    sous = p.add_subparsers(dest='commande', metavar='commande')
-    s = sous.add_parser('init', help="Crée un dossier de travail (configuration, clé API, consignes de l'agent)")
-    s.add_argument('dossier', nargs='?', type=chemin, default=Path('.'), help='dossier à créer (par défaut, le dossier courant)')
-    s.add_argument('--dossier-zotero', type=chemin, help='dossier de données de Zotero (par défaut, ~/Zotero)')
-    s.add_argument('--maj', action='store_true', help="met à jour les consignes de l'agent (AGENTS.md et skills) seulement")
-    s.set_defaults(action=init)
-    s = sous.add_parser('audit', help='Audit en lecture seule de la bibliothèque')
-    s.add_argument('--dossier', type=chemin, help='dossier de travail (par défaut, celui qui contient config.toml)')
-    s.add_argument('--sans-empreintes', action='store_true',
-                   help='ne pas comparer le contenu des PDF (plus rapide sur une grande bibliothèque)')
-    s.add_argument('--hors-ligne', action='store_true',
-                   help='ne pas chercher sur zotero.org les fichiers absents du disque')
-    s.set_defaults(action=audit)
-    s = sous.add_parser('sauvegarder', help='Sauvegarde le dossier Zotero (Zotero fermé)')
-    s.add_argument('--dossier', type=chemin, help='dossier de travail')
-    s.set_defaults(action=sauvegarder)
-    s = sous.add_parser('appliquer', help="Applique un plan préparé par une étape (essai d'abord)")
-    s.add_argument('plan', type=chemin, help='fichier du plan (plans/…json)')
+    under = p.add_subparsers(dest='command')
+    s = under.add_parser('init', help='Creates a working folder (configuration, API key, instructions for the agent)')
+    s.add_argument('folder', nargs='?', type=path, default=Path('.'),
+                   help='folder to create (by default, the current folder)')
+    s.add_argument('--zotero-dir', type=path, help='Zotero data folder (by default, ~/Zotero)')
+    s.add_argument('--library-language', choices=lang.LANGUAGES,
+                   help='language of the library, for a new working folder (asked in a terminal when missing)')
+    s.add_argument('--update', action='store_true',
+                   help="only updates the agent's instructions (AGENTS.md and skills)")
+    s.set_defaults(handler=init)
+    s = under.add_parser('audit', help='Read-only audit of the library')
+    _workspace(s)
+    s.add_argument('--no-hashes', action='store_true',
+                   help='do not compare the content of the PDFs (faster on a large library)')
+    s.add_argument('--offline', action='store_true', help='do not look on zotero.org for the files missing from disk')
+    s.set_defaults(handler=audit)
+    s = under.add_parser('backup', help='Backs up the Zotero folder (Zotero closed)')
+    _workspace(s)
+    s.set_defaults(handler=make_backup)
+    s = under.add_parser('apply', help='Applies a plan prepared by a step (trial first)')
+    s.add_argument('plan', type=path, help='plan file (plans/…json)')
     mode = s.add_mutually_exclusive_group()
-    mode.add_argument('--essai', action='store_true', help="applique les premiers groupes seulement")
-    mode.add_argument('--tout', action='store_true', help="applique le reste (après l'essai et une sauvegarde)")
-    s.add_argument('--dossier', type=chemin, help='dossier de travail')
-    s.set_defaults(action=appliquer)
-    s = sous.add_parser('annuler', help="Prépare l'annulation d'une écriture (journal ou plan)")
-    s.add_argument('cible', type=chemin, help='journal (journal/…jsonl) ou plan (plans/…json) à annuler')
-    s.add_argument('--dossier', type=chemin, help='dossier de travail')
-    s.set_defaults(action=annuler)
-    s = sous.add_parser('doublons', help='Étape 2 du nettoyage, doublons')
-    ss = s.add_subparsers(dest='sous_commande', metavar='sous-commande', required=True)
-    t = ss.add_parser('chercher', help='Repère les doublons et met à jour suivi/doublons.toml')
-    t.add_argument('--dossier', type=chemin, help='dossier de travail')
-    t.set_defaults(action=doublons_chercher)
-    t = ss.add_parser('planifier', help='Prépare le plan de fusion des groupes décidés')
-    t.add_argument('--dossier', type=chemin, help='dossier de travail')
-    t.set_defaults(action=doublons_planifier)
-    t = ss.add_parser('accepter', help='Décide de fusionner des groupes, ou tous les groupes sûrs (--surs)')
-    t.add_argument('cles', nargs='*', metavar='CLÉ', help="clé d'une fiche de chaque groupe")
-    t.add_argument('--surs', action='store_true', help='fusionne tous les groupes sûrs encore à juger')
-    t.add_argument('--sauf', nargs='+', default=[], metavar='CLÉ', help='groupes à laisser de côté avec --surs')
-    t.add_argument('--conserver', nargs='+', default=[], metavar='CLÉ',
-                   help='fiche à garder dans son groupe, groupe accepté du même coup')
-    t.add_argument('--dossier', type=chemin, help='dossier de travail')
-    t.set_defaults(action=doublons_decider, action_suivi='accepter')
-    t = ss.add_parser('refuser', help="Juge des groupes distincts (pas des doublons), qui ne seront plus proposés")
-    t.add_argument('cles', nargs='+', metavar='CLÉ', help="clé d'une fiche de chaque groupe")
-    t.add_argument('--raison', help='raison, gardée dans le fichier (éditions différentes…)')
-    t.add_argument('--dossier', type=chemin, help='dossier de travail')
-    t.set_defaults(action=doublons_decider, action_suivi='refuser')
-    s = sous.add_parser('pieces', help='PDF identiques, copies en trop ou sur la mauvaise fiche (étape 2)')
-    ss = s.add_subparsers(dest='sous_commande', metavar='sous-commande', required=True)
-    t = ss.add_parser('chercher', help='Repère les PDF identiques et met à jour suivi/pieces.toml')
-    t.add_argument('--dossier', type=chemin, help='dossier de travail')
-    t.set_defaults(action=pieces_chercher)
-    t = ss.add_parser('planifier', help='Prépare le plan des groupes décidés')
-    t.add_argument('--dossier', type=chemin, help='dossier de travail')
-    t.set_defaults(action=pieces_planifier)
-    t = ss.add_parser('accepter', help='Décide quelles copies vont à la corbeille ou sur une autre fiche')
-    t.add_argument('--corbeille', nargs='+', default=[], metavar='COPIE', help='copies à mettre à la corbeille')
-    t.add_argument('--rattacher', nargs='+', default=[], metavar='COPIE=FICHE',
-                   help='copies à rattacher à une autre fiche')
-    t.add_argument('--raison', help='note libre, gardée dans le fichier')
-    t.add_argument('--dossier', type=chemin, help='dossier de travail')
-    t.set_defaults(action=pieces_decider, action_suivi='accepter')
-    t = ss.add_parser('refuser', help='Garde toutes les copies de ces groupes (copies voulues, à ne plus signaler)')
-    t.add_argument('copies', nargs='+', metavar='COPIE', help="clé d'une copie de chaque groupe")
-    t.add_argument('--raison', help='raison, gardée dans le fichier (chapitre et livre entier…)')
-    t.add_argument('--dossier', type=chemin, help='dossier de travail')
-    t.set_defaults(action=pieces_decider, action_suivi='refuser')
-    s = sous.add_parser('metadonnees', help='Étape 3 du nettoyage, métadonnées')
-    ss = s.add_subparsers(dest='sous_commande', metavar='sous-commande', required=True)
-    for nom, aide, action in (('identifiants', 'Corrige, vérifie et cherche les DOI', metadonnees_identifiants),
-                              ('types', 'Corrige le type des fiches d\'après la source du DOI', metadonnees_types),
-                              ('completer', 'Complète les champs vides depuis le DOI', metadonnees_completer)):
-        t = ss.add_parser(nom, help=aide)
-        t.add_argument('--rafraichir', action='store_true', help='vide le cache des sources avant de commencer')
-        t.add_argument('--dossier', type=chemin, help='dossier de travail')
-        t.set_defaults(action=action)
-    t = ss.add_parser('accepter', help='Accepte des cas à juger, ou tous les évidents (--evidents)')
-    t.add_argument('cles', nargs='*', metavar='CLÉ[=N]', help='fiche (CLÉ:problème pour un seul de ses cas), avec le numéro de la proposition retenue')
-    t.add_argument('--evidents', action='store_true', help='accepte tous les cas évidents encore à juger')
-    t.add_argument('--sauf', nargs='+', default=[], metavar='CLÉ', help='fiches à laisser de côté avec --evidents')
-    t.add_argument('--dossier', type=chemin, help='dossier de travail')
-    t.set_defaults(action=metadonnees_decider, action_suivi='accepter')
-    t = ss.add_parser('refuser', help='Refuse les cas à juger de ces fiches, qui ne seront plus proposés')
-    t.add_argument('cles', nargs='+', metavar='CLÉ')
-    t.add_argument('--dossier', type=chemin, help='dossier de travail')
-    t.set_defaults(action=metadonnees_decider, action_suivi='refuser')
-    s = sous.add_parser('inbox', help="Gestion courante, tri des nouvelles références (Inbox et hors fonds)")
-    ss = s.add_subparsers(dest='sous_commande', metavar='sous-commande', required=True)
-    t = ss.add_parser('preparer', help='Doublons, métadonnées et thèmes voisins des références à trier')
-    t.add_argument('--dossier', type=chemin, help='dossier de travail')
-    t.set_defaults(action=inbox_preparer)
-    t = ss.add_parser('planifier', help='Un seul plan pour les références jugées (fusions, champs, rangement)')
-    t.add_argument('--dossier', type=chemin, help='dossier de travail')
-    t.set_defaults(action=inbox_planifier)
-    s = sous.add_parser('fonds', help='Étape 4 du nettoyage, plan du fonds (puis étape 5, rangement)')
-    ss = s.add_subparsers(dest='sous_commande', metavar='sous-commande', required=True)
-    t = ss.add_parser('inventaire', help="Inventaire du classement existant, prépare suivi/fonds.toml")
-    t.add_argument('--dossier', type=chemin, help='dossier de travail')
-    t.set_defaults(action=fonds_inventaire)
-    t = ss.add_parser('valider', help='Contrôle plan.md et suivi/fonds.toml')
-    t.add_argument('--enregistrer', action='store_true', help="enregistre la validation (après accord de l'utilisateur)")
-    t.add_argument('--dossier', type=chemin, help='dossier de travail')
-    t.set_defaults(action=fonds_valider)
-    t = ss.add_parser('suivre', help='Reporte dans plan.md les thèmes créés, renommés, déplacés ou supprimés dans Zotero')
-    t.add_argument('--enregistrer', action='store_true', help="écrit plan.md et le suivi (après accord de l'utilisateur)")
-    t.add_argument('--dossier', type=chemin, help='dossier de travail')
-    t.set_defaults(action=fonds_suivre)
-    t = ss.add_parser('titres', help="Tous les titres d'un thème, pour proposer des sous-thèmes")
-    t.add_argument('chemin', help='chemin du thème dans le fonds (« Psychologie/Perception »)')
-    t.add_argument('--dossier', type=chemin, help='dossier de travail')
-    t.set_defaults(action=fonds_titres)
-    t = ss.add_parser('a-ranger', help='Fiches à répartir ou à placer, par paquets (étape 5)')
-    t.add_argument('--resume', metavar='CLE', help="donne le résumé d'une fiche douteuse")
-    t.add_argument('--examinees', nargs='+', metavar='CLE',
-                   help='marque ces collections à répartir comme entièrement jugées')
-    t.add_argument('--laisser', nargs='+', metavar='CLE',
-                   help='note ces fiches sans place comme vues et laissées hors du fonds')
-    t.add_argument('--dossier', type=chemin, help='dossier de travail')
-    t.set_defaults(action=fonds_a_ranger)
-    t = ss.add_parser('planifier', help='Prépare le plan de rangement (étape 5), relançable après chaque passe')
-    t.add_argument('--racines', action='store_true', help='renomme aussi les racines d\'après [racines] de fonds.toml')
-    t.add_argument('--dossier', type=chemin, help='dossier de travail')
-    t.set_defaults(action=fonds_planifier)
-    s = sous.add_parser('tags', help='Étape 6 du nettoyage, tags (automatiques, variantes, concepts, états)')
-    ss = s.add_subparsers(dest='sous_commande', metavar='sous-commande', required=True)
-    t = ss.add_parser('inventaire', help='Inventaire des tags, prépare ou complète suivi/tags.toml')
-    t.add_argument('--dossier', type=chemin, help='dossier de travail')
-    t.set_defaults(action=tags_inventaire)
-    t = ss.add_parser('planifier', help='Prépare le plan des règles acceptées, relançable après chaque passe')
-    t.add_argument('--dossier', type=chemin, help='dossier de travail')
-    t.set_defaults(action=tags_planifier)
-    for verbe, aide in (('accepter', 'Accepte des règles de suivi/tags.toml, ou toutes les évidentes (--evidents)'),
-                        ('refuser', 'Refuse des règles de suivi/tags.toml')):
-        t = ss.add_parser(verbe, help=aide)
-        t.add_argument('noms', nargs='*', metavar='NOM', help='entrées [[tag]], par leur nom entre guillemets')
-        t.add_argument('--variantes', nargs='+', default=[], metavar='NOM',
-                       help='groupes [[variantes]], par leur cible ou l\'un de leurs noms')
-        t.add_argument('--regle-automatiques', action='store_true', help='règle qui retire les tags automatiques')
-        t.add_argument('--regle-importes', action='store_true', help='règle qui retire les mots-clés importés')
-        if verbe == 'accepter':
-            t.add_argument('--evidents', action='store_true',
-                           help='accepte toutes les entrées et tous les groupes évidents encore à juger')
-            t.add_argument('--sauf', nargs='+', default=[], metavar='NOM', help='noms à laisser de côté avec --evidents')
-            t.add_argument('--sort', help='autre sort pour les entrées données (supprimer, garder, concept, état, '
-                                          'fusionner)')
-            t.add_argument('--cible', help='autre cible pour les entrées et groupes donnés')
-        t.add_argument('--dossier', type=chemin, help='dossier de travail')
-        t.set_defaults(action=tags_decider, action_suivi=verbe)
-    t = ss.add_parser('ajouter', help='Ajoute à suivi/tags.toml, acceptée, une règle pour des tags sans entrée')
-    t.add_argument('noms', nargs='+', metavar='NOM', help='tags, par leur nom entre guillemets')
-    t.add_argument('--sort', required=True, help='supprimer, garder, concept, état ou fusionner')
-    t.add_argument('--cible', help='nom visé par un concept, un état ou une fusion')
-    t.add_argument('--utilisateur', action='store_true',
-                   help="demande explicite de l'utilisateur (source « utilisateur », seule à changer un tag protégé)")
-    t.add_argument('--dossier', type=chemin, help='dossier de travail')
-    t.set_defaults(action=tags_ajouter)
-    s = sous.add_parser('cles', help='Étape 7 du nettoyage, clés de citation (doubles, restes dans Extra)')
-    ss = s.add_subparsers(dest='sous_commande', metavar='sous-commande', required=True)
-    t = ss.add_parser('planifier', help='Prépare le plan des clés en double et des lignes « Citation Key: » d\'Extra, '
-                                        'relançable après chaque passe')
-    t.add_argument('--dossier', type=chemin, help='dossier de travail')
-    t.set_defaults(action=cles_planifier)
-    t = ss.add_parser('decider', help='Décide des cas de suivi/cles.toml (clé gardée, double ou ligne d\'Extra)')
-    t.add_argument('decisions', nargs='+', metavar='FICHE=DÉCISION',
-                   help='garder (la fiche garde la clé de son double), écarter, natif ou extra (ligne d\'Extra)')
-    t.add_argument('--raison', help='note libre, gardée dans le fichier')
-    t.add_argument('--dossier', type=chemin, help='dossier de travail')
-    t.set_defaults(action=cles_decider)
-    s = sous.add_parser('noms', help='Étape 8 du nettoyage, noms des fichiers d\'après le modèle de Zotero')
-    ss = s.add_subparsers(dest='sous_commande', metavar='sous-commande', required=True)
-    t = ss.add_parser('planifier', help='Prépare le renommage des fichiers en retard, relançable après chaque passe')
-    t.add_argument('--hors-ligne', action='store_true',
-                   help='ne pas chercher sur zotero.org les fichiers absents du disque (ils ne sont pas renommés)')
-    t.add_argument('--dossier', type=chemin, help='dossier de travail')
-    t.set_defaults(action=noms_planifier)
-    s = sous.add_parser('journal', help='Liste les écritures journalisées et leur état')
-    s.add_argument('--dossier', type=chemin, help='dossier de travail')
-    s.set_defaults(action=journal)
-    s = sous.add_parser('voir', help="Montre des fiches en entier (champs, début du texte des PDF) pour juger un cas")
-    s.add_argument('cles', nargs='*', metavar='clé', help='clés de fiches ou de pièces jointes')
-    s.add_argument('--tag', metavar='NOM', help='montre les éléments qui portent ce tag (étape 6)')
-    s.add_argument('--dossier', type=chemin, help='dossier de travail')
-    s.set_defaults(action=voir)
-    for nom, (aide, _) in A_VENIR.items():
-        sous.add_parser(nom, help=aide)
+    mode.add_argument('--trial', action='store_true', help='applies the first groups only')
+    mode.add_argument('--all', action='store_true', help='applies the rest (after the trial and a backup)')
+    _workspace(s)
+    s.set_defaults(handler=apply_plan)
+    s = under.add_parser('undo', help='Prepares the undoing of a write (journal or plan)')
+    s.add_argument('target', type=path, help='journal (journal/…jsonl) or plan (plans/…json) to undo')
+    _workspace(s)
+    s.set_defaults(handler=undo_plan)
+    s = under.add_parser('duplicates', help='Step 2 of the cleanup, duplicates')
+    ss = s.add_subparsers(dest='subcommand', required=True)
+    t = ss.add_parser('find', help='Finds the duplicates and updates suivi/doublons.toml')
+    _workspace(t)
+    t.set_defaults(handler=duplicates_find)
+    t = ss.add_parser('plan', help='Prepares the merge plan of the decided groups')
+    _workspace(t)
+    t.set_defaults(handler=duplicates_make_plan)
+    t = ss.add_parser('accept', help='Decides to merge groups, or all the certain groups (--certain)')
+    t.add_argument('keys', nargs='*', metavar='KEY', help='key of one item of each group')
+    t.add_argument('--certain', action='store_true', help='merges all the certain groups still to judge')
+    t.add_argument('--except', dest='except_', nargs='+', default=[], metavar='KEY',
+                   help='items to take out of the group designated by KEY or --keep, which is merged without them '
+                        '(each one judged not a duplicate of the rest); with --certain, also the certain groups to '
+                        'leave aside')
+    t.add_argument('--keep', nargs='+', default=[], metavar='KEY',
+                   help='item to keep in its group, the group being accepted at the same time')
+    _workspace(t)
+    t.set_defaults(handler=duplicates_decide, tracking_action='accept')
+    t = ss.add_parser('reject', help='Judges groups distinct (not duplicates), which will no longer be proposed')
+    t.add_argument('keys', nargs='+', metavar='KEY', help='key of one item of each group')
+    t.add_argument('--reason', help='reason, kept in the file (different editions…)')
+    _workspace(t)
+    t.set_defaults(handler=duplicates_decide, tracking_action='reject')
+    s = under.add_parser('attachments', help='Identical PDFs, extra copies or copies on the wrong item (step 2)')
+    ss = s.add_subparsers(dest='subcommand', required=True)
+    t = ss.add_parser('find', help='Finds the identical PDFs and updates suivi/pieces.toml')
+    _workspace(t)
+    t.set_defaults(handler=attachments_find)
+    t = ss.add_parser('plan', help='Prepares the plan of the decided groups')
+    _workspace(t)
+    t.set_defaults(handler=attachments_make_plan)
+    t = ss.add_parser('accept', help='Decides which copies go to the trash or to another item')
+    t.add_argument('--trash', nargs='+', default=[], metavar='COPY', help='copies to move to the trash')
+    t.add_argument('--move', nargs='+', default=[], metavar='COPY=ITEM', help='copies to attach to another item')
+    t.add_argument('--reason', help='free note, kept in the file')
+    _workspace(t)
+    t.set_defaults(handler=attachments_decide, tracking_action='accept')
+    t = ss.add_parser('reject', help='Keeps all the copies of these groups (wanted copies, no longer reported)')
+    t.add_argument('copies', nargs='+', metavar='COPY', help='key of one copy of each group')
+    t.add_argument('--reason', help='reason, kept in the file (chapter and whole book…)')
+    _workspace(t)
+    t.set_defaults(handler=attachments_decide, tracking_action='reject')
+    s = under.add_parser('metadata', help='Step 3 of the cleanup, metadata')
+    ss = s.add_subparsers(dest='subcommand', required=True)
+    for name, help_text, action in (('identifiers', 'Corrects, checks and looks for DOIs', metadata_identifiers),
+                                    ('types', 'Corrects the type of the items from the DOI source', metadata_types),
+                                    ('complete', 'Fills in the empty fields from the DOI', metadata_complete)):
+        t = ss.add_parser(name, help=help_text)
+        t.add_argument('--refresh', action='store_true', help='empties the cache of the sources before starting')
+        _workspace(t)
+        t.set_defaults(handler=action)
+    t = ss.add_parser('accept', help='Accepts cases to judge, or all the obvious ones (--obvious)')
+    t.add_argument('keys', nargs='*', metavar='KEY[=N]',
+                   help='item (KEY:problem for only one of its cases), with the number of the chosen proposal')
+    t.add_argument('--obvious', action='store_true', help='accepts all the obvious cases still to judge')
+    t.add_argument('--except', dest='except_', nargs='+', default=[], metavar='KEY',
+                   help='items to leave aside with --obvious')
+    _workspace(t)
+    t.set_defaults(handler=metadata_decide, tracking_action='accept')
+    t = ss.add_parser('reject', help='Rejects the cases to judge of these items, which will no longer be proposed')
+    t.add_argument('keys', nargs='+', metavar='KEY')
+    _workspace(t)
+    t.set_defaults(handler=metadata_decide, tracking_action='reject')
+    s = under.add_parser('inbox', help='Ongoing management, sorting of the new items (Inbox and outside the subjects)')
+    ss = s.add_subparsers(dest='subcommand', required=True)
+    t = ss.add_parser('prepare', help='Duplicates, metadata and neighbouring themes of the items to sort')
+    _workspace(t)
+    t.set_defaults(handler=inbox_prepare)
+    t = ss.add_parser('plan', help='A single plan for the judged items (merges, fields, filing)')
+    _workspace(t)
+    t.set_defaults(handler=inbox_make_plan)
+    s = under.add_parser('subjects', help='Step 4 of the cleanup, outline of the subjects (then step 5, filing)')
+    ss = s.add_subparsers(dest='subcommand', required=True)
+    t = ss.add_parser('inventory', help='Inventory of the existing classification, prepares suivi/fonds.toml')
+    _workspace(t)
+    t.set_defaults(handler=subjects_inventory)
+    t = ss.add_parser('validate', help='Checks plan.md and suivi/fonds.toml')
+    t.add_argument('--save', action='store_true', help='saves the validation (after the agreement of the user)')
+    _workspace(t)
+    t.set_defaults(handler=subjects_validate)
+    t = ss.add_parser('track', help='Carries over to plan.md the themes created, renamed, moved or deleted in Zotero')
+    t.add_argument('--save', action='store_true',
+                   help='writes plan.md and the tracking files (after the agreement of the user)')
+    _workspace(t)
+    t.set_defaults(handler=subjects_track)
+    t = ss.add_parser('titles', help='All the titles of a theme, to propose subthemes')
+    t.add_argument('path', help='path of the theme in the subjects (“Psychology/Perception”)')
+    _workspace(t)
+    t.set_defaults(handler=subjects_titles)
+    t = ss.add_parser('pending', help='Items to distribute or to place, in bundles (step 5)')
+    t.add_argument('--abstract', metavar='KEY', help='gives the abstract of a doubtful item')
+    t.add_argument('--reviewed', nargs='+', metavar='KEY',
+                   help='marks these collections to distribute as entirely judged')
+    t.add_argument('--leave-out', nargs='+', metavar='KEY',
+                   help='notes these items without a place as seen and left out of the subjects')
+    _workspace(t)
+    t.set_defaults(handler=subjects_pending)
+    t = ss.add_parser('plan', help='Prepares the filing plan (step 5), can be rerun after each pass')
+    t.add_argument('--roots', action='store_true', help='also renames the roots after [racines] of fonds.toml')
+    _workspace(t)
+    t.set_defaults(handler=subjects_make_plan)
+    s = under.add_parser('tags', help='Step 6 of the cleanup, tags (automatic, variants, concepts, statuses)')
+    ss = s.add_subparsers(dest='subcommand', required=True)
+    t = ss.add_parser('inventory', help='Inventory of the tags, prepares or completes suivi/tags.toml')
+    _workspace(t)
+    t.set_defaults(handler=tags_inventory)
+    t = ss.add_parser('plan', help='Prepares the plan of the accepted rules, can be rerun after each pass')
+    _workspace(t)
+    t.set_defaults(handler=tags_make_plan)
+    action = _stored_value(registry.VALUES['tags accepter', '--sort'])
+    actions = ', '.join(registry.VALUES['tags accepter', '--sort'].values())
+    for verb, help_text in (('accept', 'Accepts rules of suivi/tags.toml, or all the obvious ones (--obvious)'),
+                            ('reject', 'Rejects rules of suivi/tags.toml')):
+        t = ss.add_parser(verb, help=help_text)
+        t.add_argument('names', nargs='*', metavar='NAME', help='[[tag]] entries, by their name in quotes')
+        t.add_argument('--variants', nargs='+', default=[], metavar='NAME',
+                       help='[[variantes]] groups, by their target or one of their names')
+        t.add_argument('--automatic-rule', action='store_true', help='rule that removes the automatic tags')
+        t.add_argument('--imported-rule', action='store_true', help='rule that removes the imported keywords')
+        if verb == 'accept':
+            t.add_argument('--obvious', action='store_true',
+                           help='accepts all the obvious entries and groups still to judge')
+            t.add_argument('--except', dest='except_', nargs='+', default=[], metavar='NAME',
+                           help='names to leave aside with --obvious')
+            t.add_argument('--action', type=action, help=f'other action for the given entries ({actions})')
+            t.add_argument('--target', help='other target for the given entries and groups')
+        _workspace(t)
+        t.set_defaults(handler=tags_decide, tracking_action=verb)
+    t = ss.add_parser('add', help='Adds to suivi/tags.toml, accepted, a rule for tags without an entry')
+    t.add_argument('names', nargs='+', metavar='NAME', help='tags, by their name in quotes')
+    t.add_argument('--action', type=action, required=True, help=actions)
+    t.add_argument('--target', help='name aimed at by a concept, a status or a merge')
+    t.add_argument('--user', action='store_true',
+                   help='explicit request of the user (source « utilisateur », the only one to change a protected tag)')
+    _workspace(t)
+    t.set_defaults(handler=tags_add)
+    s = under.add_parser('citation-keys', help='Step 7 of the cleanup, citation keys (duplicates, leftovers in Extra)')
+    ss = s.add_subparsers(dest='subcommand', required=True)
+    t = ss.add_parser('plan', help='Prepares the plan of the duplicate keys and of the “Citation Key:” lines of '
+                                   'Extra, can be rerun after each pass')
+    _workspace(t)
+    t.set_defaults(handler=keys_make_plan)
+    t = ss.add_parser('decide', help='Decides the cases of suivi/cles.toml (key kept, duplicate or Extra line)')
+    t.add_argument('decisions', nargs='+', metavar='ITEM=DECISION',
+                   help='keep (the item keeps the key of its duplicate), skip, native or extra (Extra line)')
+    t.add_argument('--reason', help='free note, kept in the file')
+    _workspace(t)
+    t.set_defaults(handler=keys_decide)
+    s = under.add_parser('filenames', help="Step 8 of the cleanup, file names after Zotero's template")
+    ss = s.add_subparsers(dest='subcommand', required=True)
+    t = ss.add_parser('plan', help='Prepares the renaming of the files lagging behind, can be rerun after each pass')
+    t.add_argument('--offline', action='store_true',
+                   help='do not look on zotero.org for the files missing from disk (they are not renamed)')
+    _workspace(t)
+    t.set_defaults(handler=filenames_make_plan)
+    s = under.add_parser('journal', help='Lists the journaled writes and their state')
+    _workspace(s)
+    s.set_defaults(handler=journal)
+    s = under.add_parser('show', help='Shows items in full (fields, start of the text of the PDFs) to judge a case')
+    s.add_argument('keys', nargs='*', metavar='KEY', help='keys of items or attachments')
+    s.add_argument('--tag', metavar='NAME', help='shows the elements that carry this tag (step 6)')
+    _workspace(s)
+    s.set_defaults(handler=show)
+    s = under.add_parser('config', help='Configuration of the working folder')
+    ss = s.add_subparsers(dest='subcommand', required=True)
+    t = ss.add_parser('show', help='Prints the effective configuration, defaults included, as TOML (read-only)')
+    _workspace(t)
+    t.set_defaults(handler=config_show)
+    for name, (help_text, _) in UPCOMING.items():
+        under.add_parser(name, help=help_text)
     return p
 
 
-def chemin(texte: str) -> Path:
-    """Chemin donné en argument, `~` compris : Windows PowerShell 5.1 ne le développe pas pour un programme (D193)."""
-    return Path(texte).expanduser()
+def path(text: str) -> Path:
+    """Path given as an argument, `~` included: Windows PowerShell 5.1 does not expand it for a program (D193)."""
+    return Path(text).expanduser()
 
 
-def sortie_utf8() -> None:
-    """Sous Windows, une sortie redirigée vers un tube (celle que lit un agent) s'écrit dans le jeu de caractères de
-    la machine, et un titre grec ou une flèche y arrêtaient la commande. Elle passe en UTF-8 (D193)."""
-    for flux in (sys.stdout, sys.stderr):
-        if (getattr(flux, 'encoding', '') or '').lower().replace('-', '') != 'utf8' and hasattr(flux, 'reconfigure'):
+def utf8_output() -> None:
+    """On Windows, an output redirected to a pipe (the one an agent reads) is written in the machine's character
+    set, and a Greek title or an arrow stopped the command there. It switches to UTF-8 (D193)."""
+    for stream in (sys.stdout, sys.stderr):
+        if (getattr(stream, 'encoding', '') or '').lower().replace('-', '') != 'utf8' and hasattr(stream, 'reconfigure'):
             try:
-                flux.reconfigure(encoding='utf-8', errors='replace')
+                stream.reconfigure(encoding='utf-8', errors='replace')
             except (ValueError, OSError):
                 pass
 
 
 def main(argv: list[str] | None = None) -> int:
-    sortie_utf8()
-    p = analyseur()
+    utf8_output()
+    argv = list(argv if argv is not None else sys.argv[1:])
+    if former := former_names(argv):
+        _refuse_former_names(argv, *former)
+    p = build_parser()
     args = p.parse_args(argv)
-    if args.commande is None:
+    if args.command is None:
         p.print_help()
         return 0
-    if hasattr(args, 'action'):
-        debut = time.monotonic()
-        code = executer(args)
-        _enregistrer_duree(args, argv if argv is not None else sys.argv[1:], debut, code)
+    if hasattr(args, 'handler'):
+        start = time.monotonic()
+        code = run_command(args)
+        _save_duration(args, argv, start, code)
         return code
-    print(f'zc {args.commande} : pas encore disponible (prévu pour la {A_VENIR[args.commande][1]}).', file=sys.stderr)
+    print(L(en=f'zc {args.command}: not available yet (planned for {UPCOMING[args.command][1]}).',
+            fr=f'zc {args.command} : pas encore disponible (prévu pour la {UPCOMING[args.command][1]}).'),
+          file=sys.stderr)
     return 1
 
 
-def _enregistrer_duree(args, argv: list[str], debut: float, code: int) -> None:
-    """Une ligne par commande dans `journal/commandes.jsonl` du dossier de travail (D173), pour savoir où passe le
-    temps d'une séance. Les intervalles entre deux commandes donnent le temps de l'agent et de l'utilisateur. Rien ne
-    quitte l'ordinateur, et un échec d'écriture n'empêche jamais la commande."""
+def former_names(argv: list[str]) -> tuple[list[str], list[tuple[str, str]]] | None:
+    """The command line written with the English names, and the words renamed, when `argv` uses a name of version
+    0.3.2 (command, subcommand, option or option value, D213, D219). None when it uses none.
+
+    The line is first brought back to the old command and subcommand, with the new options written under their old
+    names, so that `registry.translate` finds the values to translate whatever the mix of old and new names. Since
+    `translate` maps word for word, the renamed words are those that differ."""
+    if not argv:
+        return None
+    new_commands = {new: old for old, (new, _) in registry.COMMANDS.items()}
+    old = argv[0] if argv[0] in registry.COMMANDS else new_commands.get(argv[0])
+    if old is None:
+        return None
+    under = registry.COMMANDS[old][1]
+    head, rest = [old], argv[1:]
+    if under and rest:
+        new_under = {new: o for o, new in under.items()}
+        if rest[0] in under or rest[0] in new_under:
+            head.append(rest[0] if rest[0] in under else new_under[rest[0]])
+            rest = rest[1:]
+    new_options = {new: o for o, new in registry.OPTIONS.items()}
+    former = []
+    for word in rest:
+        name, equals, value = word.partition('=')
+        if word.startswith('--') and name not in registry.OPTIONS and name in new_options:
+            word = new_options[name] + equals + value
+        former.append(word)
+    english = registry.translate(head + former)
+    renamed = [(a, b) for a, b in zip(argv, english) if a != b]
+    return (english, renamed) if renamed else None
+
+
+def _shell_word(word: str) -> str:
+    """`word` as typed in the user's shell. Under Windows, cmd and PowerShell take backslashes as they are and only
+    double quotes protect a space; elsewhere, POSIX quoting."""
+    if os.name == 'nt':
+        return f'"{word}"' if not word or re.search(r'[\s&|<>()^;,%"\'`$]', word) else word
+    return shlex.quote(word) if not word or re.search(r'''[\s'"`$;&|<>()*?\\!#]''', word) else word
+
+
+def _refuse_former_names(argv: list[str], english: list[str], renamed: list[tuple[str, str]]) -> None:
+    """Refusal of a name of version 0.3.2, with the full equivalent command line (D213), in the language of the
+    working folder that the line designates, or of the current one (English outside a working folder, D222)."""
+    from zot_clean import config
+    folder = None
+    for i, word in enumerate(argv):
+        name, equals, value = word.partition('=')
+        if name in ('--workspace', '--dossier'):
+            value = value if equals else (argv[i + 1] if i + 1 < len(argv) else '')
+            folder = path(value) if value else None
+            break
+    else:
+        folder = config.find_workspace()
+    line = 'zc ' + ' '.join(_shell_word(w) for w in english)
+    with lang.language(lang.of_workspace(folder)):
+        pairs = ', '.join(L(en=f'`{a}` is now `{b}`', fr=f'`{a}` devient `{b}`') for a, b in renamed)
+        print(L(en=f'zc uses English names since version 0.4.0 ({pairs}). Run instead\n  {line}',
+                fr=f'zc emploie des noms anglais depuis la version 0.4.0 ({pairs}). Lancer plutôt\n  {line}'),
+              file=sys.stderr)
+    raise SystemExit(2)
+
+
+def config_show(args) -> int:
+    """`zc config show`, read-only: the effective configuration, defaults included, under the sections and keys of
+    config.toml (D209), so that an agent can read the language of the library (D221)."""
+    from zot_clean import config
+    cfg = config.load(args.workspace)
+    # Pilot bench: the language and the role of each name, said in a sentence rather than left to the keys (D242).
+    print(L(en='# Language of the library: English (en). Roles of the [methode] names: inbox = the Inbox, projets = '
+               'the roots of the projects, fonds = the root of the subjects, archives = the root of the archives, '
+               'etats = the reading statuses, autres_tags = the marks.',
+            fr='# Langue de la bibliothèque : français (fr). Rôle des noms de [methode] : inbox = l\'Inbox, projets = '
+               'les racines des projets, fonds = la racine du fonds, archives = la racine des archives, etats = les '
+               'états de lecture, autres_tags = les marques.'))
+    print(toml_text(config.to_stored(cfg)), end='')
+    return 0
+
+
+def toml_text(data: dict) -> str:
+    """Sections of `config.to_stored` written as TOML. A value left to its computed default (None, such as the
+    backup folder next to the Zotero folder) is not written."""
+    def key(k: str) -> str:
+        return k if re.fullmatch(r'[A-Za-z0-9_-]+', k) else json.dumps(k, ensure_ascii=False)
+
+    def value(v) -> str:
+        if isinstance(v, bool):
+            return 'true' if v else 'false'
+        if isinstance(v, (int, float)):
+            return repr(v)
+        if isinstance(v, Path):
+            return json.dumps(v.as_posix(), ensure_ascii=False)
+        if isinstance(v, (list, tuple)):
+            return '[' + ', '.join(value(x) for x in v) + ']'
+        if isinstance(v, dict):
+            return '{ ' + ', '.join(f'{key(k)} = {value(x)}' for k, x in v.items()) + ' }' if v else '{}'
+        return json.dumps(str(v), ensure_ascii=False)  # TOML basic strings take the JSON escapes
+
+    blocks = []
+    for section, values in data.items():
+        lines = [f'[{key(section)}]'] + [f'{key(k)} = {value(v)}' for k, v in values.items() if v is not None]
+        blocks.append('\n'.join(lines) + '\n')
+    return '\n'.join(blocks)
+
+
+def _save_duration(args, argv: list[str], start: float, code: int) -> None:
+    """One line per command in `journal/commandes.jsonl` of the working folder (D173), to know where the
+    time of a session goes. The intervals between two commands give the time of the agent and of the user. Nothing
+    leaves the computer, and a write failure never prevents the command."""
     from zot_clean import config
     try:
-        dossier = args.dossier if args.commande == 'init' else getattr(args, 'dossier', None) or config.trouver_dossier()
-        if not dossier or not (dossier / config.FICHIER).is_file():
+        folder = args.folder if args.command == 'init' else getattr(args, 'workspace', None) or config.find_workspace()
+        if not folder or not (folder / config.FILE).is_file():
             return
-        commande = ' '.join(x for x in (args.commande, getattr(args, 'sous_commande', None)) if x)
-        ligne = {'commande': commande, 'arguments': argv[len(commande.split()):],
+        command = ' '.join(x for x in (args.command, getattr(args, 'subcommand', None)) if x)
+        line = {'commande': command, 'arguments': argv[len(command.split()):],
                  'debut': datetime.now().astimezone().isoformat(timespec='seconds'),
-                 'duree': round(time.monotonic() - debut, 1), 'code': code}
-        (dossier / 'journal').mkdir(exist_ok=True)
-        from zot_clean.journal import REGISTRE
-        with open(dossier / 'journal' / REGISTRE, 'a', encoding='utf-8') as f:
-            f.write(json.dumps(ligne, ensure_ascii=False) + '\n')
+                 'duree': round(time.monotonic() - start, 1), 'code': code}
+        (folder / 'journal').mkdir(exist_ok=True)
+        from zot_clean.journal import REGISTRY
+        with open(folder / 'journal' / REGISTRY, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(line, ensure_ascii=False) + '\n')
     except (OSError, SystemExit):
         pass
 
 
-COMMANDES_INTERACTIVES = {'init'}  # elles posent des questions, qu'une ligne tenue à jour effacerait
+INTERACTIVE_COMMANDS = {'init'}  # they ask questions, which a continuously updated line would erase
 
 
-class _Ecran:
-    """Sortie d'un terminal partagée avec la ligne du minuteur : chaque écriture efface d'abord cette ligne, que le
-    minuteur redessine ensuite, pour que les messages de la commande ne s'y mêlent pas."""
+class _Screen:
+    """Terminal output shared with the timer line: each write first erases that line, which the
+    timer then redraws, so that the command's messages do not mix with it."""
 
-    def __init__(self, reel, minuteur):
-        self.reel, self.minuteur = reel, minuteur
+    def __init__(self, real, timer):
+        self.real, self.timer = real, timer
 
-    def write(self, texte):
-        with self.minuteur.verrou:
-            self.minuteur.effacer()
-            return self.reel.write(texte)
+    def write(self, text):
+        with self.timer.lock:
+            self.timer.erase()
+            return self.real.write(text)
 
-    def __getattr__(self, nom):
-        return getattr(self.reel, nom)
+    def __getattr__(self, name):
+        return getattr(self.real, name)
 
 
-class Minuteur:
-    """Sous un terminal, « zc audit en cours… 12 s » s'affiche dès le lancement et se met à jour chaque seconde, puis
-    « zc audit terminé en 14 s. » si la commande a duré (D207). Rien quand la sortie n'est pas un terminal (un agent
-    qui lit la sortie), ni pour une commande qui pose des questions."""
+class Timer:
+    """Under a terminal, « zc audit en cours… 12 s » is shown from the start and updated every second, then
+    « zc audit terminé en 14 s. » if the command took a while (D207). Nothing when the output is not a terminal (an
+    agent reading the output), nor for a command that asks questions."""
 
-    def __init__(self, nom: str, flux=None, intervalle: float = 1.0, seuil: float = 2.0):
-        self.nom, self.flux, self.intervalle, self.seuil = nom, flux or sys.stderr, intervalle, seuil
-        self.verrou, self.fin, self.affiche = threading.RLock(), threading.Event(), False
-        self.actif = hasattr(self.flux, 'isatty') and self.flux.isatty()
+    def __init__(self, name: str, stream=None, interval: float = 1.0, threshold: float = 2.0):
+        self.name, self.stream, self.interval, self.threshold = name, stream or sys.stderr, interval, threshold
+        self.lock, self.end, self.shown = threading.RLock(), threading.Event(), False
+        self.active = hasattr(self.stream, 'isatty') and self.stream.isatty()
 
-    def effacer(self):
-        if self.affiche:
-            self.flux.write('\r\x1b[K')
-            self.affiche = False
+    def erase(self):
+        if self.shown:
+            self.stream.write('\r\x1b[K')
+            self.shown = False
 
-    def _dessiner(self):
-        with self.verrou:
+    def _draw(self):
+        with self.lock:
             sys.stdout.flush()
-            self.effacer()
-            self.flux.write(f'{self.nom} en cours… {int(time.monotonic() - self.debut)} s')
-            self.flux.flush()
-            self.affiche = True
+            self.erase()
+            self.stream.write(f'{self.running} {int(time.monotonic() - self.start)} s')
+            self.stream.flush()
+            self.shown = True
 
-    def _boucle(self):
-        while not self.fin.wait(self.intervalle):
-            self._dessiner()
+    def _loop(self):
+        while not self.end.wait(self.interval):
+            self._draw()
 
     def __enter__(self):
-        self.debut = time.monotonic()
-        if self.actif:
-            self.anciens = sys.stdout, sys.stderr
-            sys.stdout, sys.stderr = _Ecran(sys.stdout, self), _Ecran(sys.stderr, self)
-            self._dessiner()
-            self.fil = threading.Thread(target=self._boucle, daemon=True)
-            self.fil.start()
+        self.start = time.monotonic()
+        # Text chosen here, in the language of the command: the drawing thread does not see the current language.
+        self.running = L(en=f'{self.name} running…', fr=f'{self.name} en cours…')
+        if self.active:
+            self.previous = sys.stdout, sys.stderr
+            sys.stdout, sys.stderr = _Screen(sys.stdout, self), _Screen(sys.stderr, self)
+            self._draw()
+            self.thread = threading.Thread(target=self._loop, daemon=True)
+            self.thread.start()
         return self
 
     def __exit__(self, *exc):
-        if not self.actif:
+        if not self.active:
             return False
-        self.fin.set()
-        self.fil.join()
-        with self.verrou:
-            self.effacer()
-            sys.stdout, sys.stderr = self.anciens
-            duree = time.monotonic() - self.debut
-            if duree >= self.seuil:
-                self.flux.write(f'{self.nom} terminé en {_duree(duree)}.\n')
-            self.flux.flush()
+        self.end.set()
+        self.thread.join()
+        with self.lock:
+            self.erase()
+            sys.stdout, sys.stderr = self.previous
+            duration = time.monotonic() - self.start
+            if duration >= self.threshold:
+                self.stream.write(L(en=f'{self.name} finished in {_duration(duration)}.\n',
+                                    fr=f'{self.name} terminé en {_duration(duration)}.\n'))
+            self.stream.flush()
         return False
 
 
-def _duree(secondes: float) -> str:
-    m, s = divmod(int(secondes), 60)
+def _duration(seconds: float) -> str:
+    m, s = divmod(int(seconds), 60)
     return f'{m} min {s:02d} s' if m else f'{s} s'
 
 
-def executer(args) -> int:
-    """Lance la commande. Tout refus ou échec sort avec un code non nul et son message sur la sortie d'erreur, pour
-    qu'un agent qui teste le code de retour le voie (répétition du pilote). Les refus des modules passent par
-    `SystemExit(message)`, ceux de l'écriture par `Refus` et `ErreurAPI`. Les lectures de la base faites par la
-    commande se partagent une seule copie (`lecture.partager`)."""
-    from zot_clean import lecture
-    from zot_clean.ecriture import ErreurAPI, Refus
-    commande = getattr(args, 'commande', None)
-    nom = ' '.join(x for x in ('zc', commande, getattr(args, 'sous_commande', None)) if x)
-    minuteur = Minuteur(nom) if commande not in COMMANDES_INTERACTIVES else contextlib.nullcontext()
+def run_command(args) -> int:
+    """Runs the command. Any refusal or failure exits with a non-zero code and its message on the error output, so
+    that an agent testing the return code sees it (pilot rehearsal). Refusals from the modules go through
+    `SystemExit(message)`, those from writing through `Refusal` and `APIError`. The database reads made by the
+    command share a single copy (`reader.share`)."""
+    from zot_clean import config, lang, reader
+    from zot_clean.api import APIError, Refusal
+    command = getattr(args, 'command', None)
+    folder = args.folder if command == 'init' else getattr(args, 'workspace', None) or config.find_workspace()
+    with lang.language(lang.of_workspace(folder)):
+        return _run(args, command)
+
+
+def _run(args, command) -> int:
+    from zot_clean import reader
+    from zot_clean.api import APIError, Refusal
+    name = ' '.join(x for x in ('zc', command, getattr(args, 'subcommand', None)) if x)
+    timer = Timer(name) if command not in INTERACTIVE_COMMANDS else contextlib.nullcontext()
     try:
-        with lecture.partager(), minuteur:
-            code = args.action(args)
+        with reader.share(), timer:
+            code = args.handler(args)
     except SystemExit as e:
         if e.code is None or isinstance(e.code, int):
             raise
         print(e.code, file=sys.stderr)
         return 1
-    except (Refus, ErreurAPI) as e:
+    except (Refusal, APIError) as e:
         print(e, file=sys.stderr)
         return 1
     except FileNotFoundError as e:
-        print(f'Fichier introuvable : {e.filename or e}', file=sys.stderr)
+        print(L(en=f'File not found: {e.filename or e}', fr=f'Fichier introuvable : {e.filename or e}'),
+              file=sys.stderr)
         return 1
     except KeyboardInterrupt:
-        print('Interrompu. Une commande interrompue se relance telle quelle.', file=sys.stderr)
+        print(L(en='Interrupted. An interrupted command can be run again as it is.',
+                fr='Interrompu. Une commande interrompue se relance telle quelle.'), file=sys.stderr)
         return 130
     return code or 0
 

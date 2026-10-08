@@ -1,0 +1,44 @@
+# Clés de citation, cas qui demandent un avis, écrits par `zc cles planifier` (étape 7).
+# Ce fichier est facultatif. Il se relit et se modifie à la main ou avec l'agent. `zc cles planifier` le met à jour
+# sans perdre les décisions prises, puis prépare le plan d'après elles. Un cas réglé dans Zotero en disparaît.
+# Les décisions s'écrivent avec `zc cles decider FICHE=garder|écarter|natif|extra`.
+#
+# [[double]], une clé de citation portée par plusieurs fiches. La plus ancienne (date d'ajout) garde la clé, les
+#   autres reçoivent un suffixe (a, b…).
+#   fiches   : fiches qui partagent la clé, de la plus ancienne à la plus récente (renseigné par zc).
+#   garde    : clé de la fiche qui garde la clé de citation, à la place de la plus ancienne (facultatif).
+#   decision : "" (départager selon la règle) ou "écarter" (laisser tel quel, hors du plan).
+#   Un double dont les fiches forment un groupe de doublons non jugé distinct est renvoyé à l'étape 2
+#   (suivi/doublons.toml), la fusion réglant la clé.
+#
+# [[extra]], une fiche dont Extra garde une ligne « Citation Key: » qui diffère de sa clé native.
+#   decision : "" (à juger), "natif" (garder la clé native, retirer la ligne), "extra" (la clé de la ligne remplace
+#              la clé native, ligne retirée) ou "écarter" (ne rien changer, hors du plan).
+#
+# raison : note libre.
+
+[[double]]
+# clé « durand2020 »
+# 2222UUB3 · Durand · 2020 · Article A, ajoutée le 2020-01-01, → Durand2020a
+# 2222UUB4 · Durand · 2020 · Article B, ajoutée le 2021-01-01, garde la clé
+# 2222UUB5 · Durand · 2020 · Article C, ajoutée le 2022-01-01, → Durand2020b
+fiches = ["2222UUB3", "2222UUB4", "2222UUB5"]
+garde = "2222UUB4"
+decision = ""
+raison = "décidé pour les fixtures"
+
+[[double]]
+# clé « zhang2016 »
+# 2222UUB9 · Durand · 2020 · Article H, ajoutée le 2016-01-01, inchangée
+# 2222UUBA · Durand · 2020 · Article K, ajoutée le 2025-01-01, inchangée
+fiches = ["2222UUB9", "2222UUBA"]
+garde = ""
+decision = "écarter"
+raison = "décidé pour les fixtures"
+
+[[extra]]
+# 2222UUB8 · Durand · 2020 · Article G
+# clé native « kim2017 », ligne d'Extra « park2017 »
+fiche = "2222UUB8"
+decision = "natif"
+raison = "décidé pour les fixtures"

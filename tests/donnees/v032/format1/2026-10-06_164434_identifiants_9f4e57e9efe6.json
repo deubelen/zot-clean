@@ -1,0 +1,29 @@
+{
+ "format": 1,
+ "empreinte": "9f4e57e9efe6",
+ "etape": "identifiants",
+ "bibliotheque": 4242,
+ "groupes": [
+  {
+   "id": "2222UUB3",
+   "titre": "Acquisition of categorical color perception",
+   "operations": [
+    {
+     "cle": "2222UUB3",
+     "avant": {
+      "DOI": "https://doi.org/10.1111/color."
+     },
+     "apres": {
+      "DOI": "10.1111/color"
+     },
+     "rang": 0,
+     "nature": "forme corrigée ('https://doi.org/10.1111/color.')"
+    }
+   ]
+  }
+ ],
+ "description": "Identifiants (DOI, ISBN) corrigés ou ajoutés.",
+ "partiel": false,
+ "annule": [],
+ "cree": "2026-10-06T16:44:34+02:00"
+}

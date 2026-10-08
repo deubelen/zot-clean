@@ -1,0 +1,57 @@
+{
+ "format": 1,
+ "empreinte": "7de6edaa92ec",
+ "etape": "annulation",
+ "bibliotheque": 4242,
+ "groupes": [
+  {
+   "id": "1",
+   "titre": "annulation du groupe 1",
+   "operations": [
+    {
+     "cle": "2222UUB3",
+     "avant": {
+      "deleted": true
+     },
+     "apres": {
+      "deleted": false
+     },
+     "rang": 0,
+     "nature": "annulation"
+    },
+    {
+     "cle": "2222UUB4",
+     "avant": {
+      "relations": {
+       "dc:replaces": [
+        "http://zotero.org/users/4242/items/2222UUB3"
+       ]
+      }
+     },
+     "apres": {
+      "relations": {}
+     },
+     "rang": 1,
+     "nature": "annulation"
+    },
+    {
+     "cle": "2222UUB5",
+     "avant": {
+      "deleted": true
+     },
+     "apres": {
+      "deleted": false
+     },
+     "rang": 2,
+     "nature": "annulation"
+    }
+   ]
+  }
+ ],
+ "description": "Annulation de 2026-10-06_164432_doublons.jsonl.",
+ "partiel": true,
+ "annule": [
+  "2026-10-06_164432_doublons.jsonl"
+ ],
+ "cree": "2026-10-06T16:44:32+02:00"
+}
